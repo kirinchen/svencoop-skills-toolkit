@@ -44,4 +44,7 @@
   otherwise: `Assertion Failed: Failed to load "SDL3.dll"` / `Unable to initialize Steam`.
 - `-condebug` did not produce `qconsole.log`; capture stdout instead (`-console`) and send
   `quit` on stdin for a clean exit so buffers flush. See the skill for the PowerShell runner.
+- Starting a new svends right after a previous one quit can fail with `Couldn't allocate
+  dedicated server IP port 27015` or the SDL3/Steam error even with PATH set: the old process
+  is still shutting down. Wait ~20 s and retry.
 - Watch for: `Map script 'NAME' loaded`, `Map script compilation succeeded`, `*Graph Loaded!`.

@@ -1,7 +1,7 @@
 /*
  * dust2_pve.as - wave-based monster survival on de_dust2 (Sven Co-op 5.x)
  *
- * Built by C:\Users\DDT\Desktop\projects\dust2-pve\build.py
+ * Built by tools/cs2sven.py (svencoop-skills-toolkit).
  *
  * - players spawn on the CT side (info_player_start)
  * - monsters come from the T spawns (info_target "pve_mspawn") and, on later waves,
@@ -9,20 +9,28 @@
  * - a wave is cleared when every monster of it is dead; players get healed and a break
  * - monsters that never find a player are pushed onto the nearest player, and a wave
  *   that drags on too long is force-cleared so the game can never soft-lock
+ *
+ * Counter-Strike style economy (weapons from KernCore's CS 1.6 Weapons Project, installed by
+ * tools/install_cs16_weapons.py; the buy rules below are our own):
+ * - .buy (bind b ".buy") / chat "buy" opens the CS buy menu, only inside the spawn buy zone
+ * - one knife, one pistol, one primary; buying into a taken slot drops the old gun
+ * - .buyammo1 (bind , ) = primary ammo, .buyammo2 (bind . ) = pistol ammo
+ * - money only from monster kills and wave-clear bonuses
  */
 
-// Counter-Strike 1.6 weapons + buy menu (KernCore's CS 1.6 Weapons Project, installed by
-// tools/install_cs16_weapons.py). Chat "!buy" opens the menu; score earns money, waves pay a bonus.
 #include "cs16/weapons"
-#include "cs16/BuyMenu"
 
-const int   START_MONEY      = 800;     // handed out on a player's first spawn
-const int   WAVE_BONUS_BASE  = 400;     // wave-clear bonus = BASE + PER_WAVE * wave number
+const int   START_MONEY      = 800;
+const int   KILL_REWARD      = 300;     // per monster killed by a player
+const int   WAVE_BONUS_BASE  = 1000;    // wave-clear bonus = BASE + PER * wave number
 const int   WAVE_BONUS_PER   = 250;
+const int   MAX_MONEY        = 16000;
+const int   KEVLAR_PRICE     = 650;
+const float BUYZONE_PAD      = 320.0f;  // buy zone = box around the CT spawns + this padding
 
 const float THINK_INTERVAL   = 1.0f;
 const float START_COUNTDOWN  = 30.0f;   // seconds after the first player spawns
-const float WAVE_BREAK       = 20.0f;   // seconds between waves
+const float WAVE_BREAK       = 25.0f;   // seconds between waves
 const float WAVE_TIMEOUT     = 420.0f;  // force-clear a wave after this long
 const int   MAX_ALIVE        = 22;      // concurrent monsters cap
 const int   SPAWN_PER_TICK   = 3;
@@ -37,6 +45,13 @@ enum PveState
     PVE_WAVE,
     PVE_BREAK,
     PVE_VICTORY
+}
+
+enum GunSlot
+{
+    SLOT_NONE = 0,      // grenades, armour
+    SLOT_PISTOL = 1,
+    SLOT_PRIMARY = 2
 }
 
 class SpawnDef
@@ -55,21 +70,51 @@ class WaveDef
     WaveDef( const string& in t, float hm, bool f ) { title = t; healthMult = hm; flank = f; }
 }
 
+class Gun
+{
+    string cls;        // entity classname (KernCore pack)
+    string label;      // menu text
+    int price;         // CS 1.6 price
+    GunSlot slot;
+    string ammo;       // ammo entity classname
+    int ammoPrice;     // per magazine
+    string cat;        // pistol / shotgun / smg / rifle / mg / equip
+    Gun( const string& in c, const string& in l, int p, GunSlot s, const string& in a, int ap, const string& in k )
+    {
+        cls = c; label = l; price = p; slot = s; ammo = a; ammoPrice = ap; cat = k;
+    }
+}
+
 array<WaveDef@> g_Waves;
+array<Gun@>     g_Guns;
 array<Vector>   g_MainSpawns;
 array<Vector>   g_FlankSpawns;
+Vector          g_BuyMins, g_BuyMaxs;
 
 PveState g_State = PVE_WAITING;
 float    g_Timer = 0.0f;
-int      g_WaveIdx = -1;          // index into g_Waves
+int      g_WaveIdx = -1;
 float    g_WaveStart = 0.0f;
-array<string>  g_Queue;           // monsters still to spawn this wave
-array<EHandle> g_Alive;           // monsters spawned this wave
-array<int>     g_IdleSecs;        // parallel to g_Alive
+array<string>  g_Queue;
+array<EHandle> g_Alive;
+array<int>     g_IdleSecs;
 int      g_WaveTotal = 0;
+
+dictionary g_Money;          // steamid -> int
+dictionary g_GotStartMoney;  // steamid -> true
+dictionary g_MenuIndex;      // menu item text -> gun index
 
 HUDTextParams g_HudBig;
 HUDTextParams g_HudStatus;
+HUDTextParams g_HudMoney;
+
+CTextMenu@ g_MenuMain    = null;
+CTextMenu@ g_MenuPistol  = null;
+CTextMenu@ g_MenuShotgun = null;
+CTextMenu@ g_MenuSmg     = null;
+CTextMenu@ g_MenuRifle   = null;
+CTextMenu@ g_MenuMg      = null;
+CTextMenu@ g_MenuEquip   = null;
 
 // ------------------------------------------------------------------ waves
 
@@ -138,10 +183,45 @@ void BuildWaves()
 
 // ------------------------------------------------------------------ CS 1.6 weapons
 
+void BuildGuns()
+{
+    // pistols (CS 1.6 prices; ammo price per magazine)
+    g_Guns.insertLast( Gun( "weapon_csglock18",  "Glock 18",        400, SLOT_PISTOL,  "ammo_csglock18",  20, "pistol" ) );
+    g_Guns.insertLast( Gun( "weapon_usp",        "USP .45",         500, SLOT_PISTOL,  "ammo_usp",        25, "pistol" ) );
+    g_Guns.insertLast( Gun( "weapon_p228",       "P228",            600, SLOT_PISTOL,  "ammo_p228",       50, "pistol" ) );
+    g_Guns.insertLast( Gun( "weapon_csdeagle",   "Desert Eagle",    650, SLOT_PISTOL,  "ammo_csdeagle",   40, "pistol" ) );
+    g_Guns.insertLast( Gun( "weapon_fiveseven",  "Five-Seven",      750, SLOT_PISTOL,  "ammo_fiveseven",  50, "pistol" ) );
+    g_Guns.insertLast( Gun( "weapon_dualelites", "Dual Elites",     800, SLOT_PISTOL,  "ammo_dualelites", 20, "pistol" ) );
+    // shotguns
+    g_Guns.insertLast( Gun( "weapon_m3",         "M3 Super 90",    1700, SLOT_PRIMARY, "ammo_m3",         65, "shotgun" ) );
+    g_Guns.insertLast( Gun( "weapon_xm1014",     "XM1014",         3000, SLOT_PRIMARY, "ammo_xm1014",     65, "shotgun" ) );
+    // smgs
+    g_Guns.insertLast( Gun( "weapon_tmp",        "TMP",            1250, SLOT_PRIMARY, "ammo_tmp",        20, "smg" ) );
+    g_Guns.insertLast( Gun( "weapon_mac10",      "MAC-10",         1400, SLOT_PRIMARY, "ammo_mac10",      25, "smg" ) );
+    g_Guns.insertLast( Gun( "weapon_mp5navy",    "MP5 Navy",       1500, SLOT_PRIMARY, "ammo_mp5navy",    20, "smg" ) );
+    g_Guns.insertLast( Gun( "weapon_ump45",      "UMP45",          1700, SLOT_PRIMARY, "ammo_ump45",      25, "smg" ) );
+    g_Guns.insertLast( Gun( "weapon_p90",        "P90",            2350, SLOT_PRIMARY, "ammo_p90",        50, "smg" ) );
+    // rifles
+    g_Guns.insertLast( Gun( "weapon_galil",      "Galil",          2000, SLOT_PRIMARY, "ammo_galil",      60, "rifle" ) );
+    g_Guns.insertLast( Gun( "weapon_famas",      "FAMAS",          2250, SLOT_PRIMARY, "ammo_famas",      60, "rifle" ) );
+    g_Guns.insertLast( Gun( "weapon_ak47",       "AK-47",          2500, SLOT_PRIMARY, "ammo_ak47",       80, "rifle" ) );
+    g_Guns.insertLast( Gun( "weapon_scout",      "Scout",          2750, SLOT_PRIMARY, "ammo_scout",      80, "rifle" ) );
+    g_Guns.insertLast( Gun( "weapon_m4a1",       "M4A1",           3100, SLOT_PRIMARY, "ammo_m4a1",       60, "rifle" ) );
+    g_Guns.insertLast( Gun( "weapon_aug",        "AUG",            3500, SLOT_PRIMARY, "ammo_aug",        60, "rifle" ) );
+    g_Guns.insertLast( Gun( "weapon_sg552",      "SG552",          3500, SLOT_PRIMARY, "ammo_sg552",      60, "rifle" ) );
+    g_Guns.insertLast( Gun( "weapon_sg550",      "SG550",          4200, SLOT_PRIMARY, "ammo_sg550",      60, "rifle" ) );
+    g_Guns.insertLast( Gun( "weapon_awp",        "AWP",            4750, SLOT_PRIMARY, "ammo_awp",       125, "rifle" ) );
+    g_Guns.insertLast( Gun( "weapon_g3sg1",      "G3SG1",          5000, SLOT_PRIMARY, "ammo_g3sg1",      80, "rifle" ) );
+    // machine gun
+    g_Guns.insertLast( Gun( "weapon_csm249",     "M249",           5750, SLOT_PRIMARY, "ammo_csm249",     60, "mg" ) );
+    // equipment
+    g_Guns.insertLast( Gun( "weapon_hegrenade",  "HE Grenade",      300, SLOT_NONE,    "",                 0, "equip" ) );
+    g_Guns.insertLast( Gun( "kevlar",            "Kevlar (100 armor)", KEVLAR_PRICE, SLOT_NONE, "",       0, "equip" ) );
+}
+
 // mirrors cs16/cs16_register.as (which cannot be a second map_script because it defines MapInit)
 void SetupCS16Weapons()
 {
-    // HUD slot positions so they do not collide with Sven's own weapons
     CS16_KNIFE::POSITION     = 10;
     CS16_GLOCK18::POSITION   = 10;  CS16_USP::POSITION   = 11;  CS16_P228::POSITION   = 12;
     CS16_57::POSITION        = 13;  CS16_ELITES::POSITION = 14; CS16_DEAGLE::POSITION = 15;
@@ -155,80 +235,88 @@ void SetupCS16Weapons()
     CS16_M249::POSITION      = 10;
     CS16_HEGRENADE::POSITION = 10;  CS16_C4::POSITION    = 11;
 
-    g_CS16Menu.RemoveItems();
     RegisterAll();
-
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_KNIFE::WPN_NAME, CS16_KNIFE::GetName(), CS16_KNIFE::WPN_PRICE, "melee" ) );
-
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_GLOCK18::WPN_NAME, CS16_GLOCK18::GetName(), CS16_GLOCK18::WPN_PRICE, "handgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_GLOCK18::AMMO_NAME, CS16_GLOCK18::GetAmmoName(), CS16_GLOCK18::AMMO_PRICE, "ammo", "handgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_USP::WPN_NAME, CS16_USP::GetName(), CS16_USP::WPN_PRICE, "handgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_USP::AMMO_NAME, CS16_USP::GetAmmoName(), CS16_USP::AMMO_PRICE, "ammo", "handgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_P228::WPN_NAME, CS16_P228::GetName(), CS16_P228::WPN_PRICE, "handgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_P228::AMMO_NAME, CS16_P228::GetAmmoName(), CS16_P228::AMMO_PRICE, "ammo", "handgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_57::WPN_NAME, CS16_57::GetName(), CS16_57::WPN_PRICE, "handgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_57::AMMO_NAME, CS16_57::GetAmmoName(), CS16_57::AMMO_PRICE, "ammo", "handgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_ELITES::WPN_NAME, CS16_ELITES::GetName(), CS16_ELITES::WPN_PRICE, "handgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_ELITES::AMMO_NAME, CS16_ELITES::GetAmmoName(), CS16_ELITES::AMMO_PRICE, "ammo", "handgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_DEAGLE::WPN_NAME, CS16_DEAGLE::GetName(), CS16_DEAGLE::WPN_PRICE, "handgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_DEAGLE::AMMO_NAME, CS16_DEAGLE::GetAmmoName(), CS16_DEAGLE::AMMO_PRICE, "ammo", "handgun" ) );
-
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_M3::WPN_NAME, CS16_M3::GetName(), CS16_M3::WPN_PRICE, "shotgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_M3::AMMO_NAME, CS16_M3::GetAmmoName(), CS16_M3::AMMO_PRICE, "ammo", "shotgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_XM1014::WPN_NAME, CS16_XM1014::GetName(), CS16_XM1014::WPN_PRICE, "shotgun" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_XM1014::AMMO_NAME, CS16_XM1014::GetAmmoName(), CS16_XM1014::AMMO_PRICE, "ammo", "shotgun" ) );
-
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_MAC10::WPN_NAME, CS16_MAC10::GetName(), CS16_MAC10::WPN_PRICE, "smg" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_MAC10::AMMO_NAME, CS16_MAC10::GetAmmoName(), CS16_MAC10::AMMO_PRICE, "ammo", "smg" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_TMP::WPN_NAME, CS16_TMP::GetName(), CS16_TMP::WPN_PRICE, "smg" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_TMP::AMMO_NAME, CS16_TMP::GetAmmoName(), CS16_TMP::AMMO_PRICE, "ammo", "smg" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_MP5::WPN_NAME, CS16_MP5::GetName(), CS16_MP5::WPN_PRICE, "smg" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_MP5::AMMO_NAME, CS16_MP5::GetAmmoName(), CS16_MP5::AMMO_PRICE, "ammo", "smg" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_UMP45::WPN_NAME, CS16_UMP45::GetName(), CS16_UMP45::WPN_PRICE, "smg" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_UMP45::AMMO_NAME, CS16_UMP45::GetAmmoName(), CS16_UMP45::AMMO_PRICE, "ammo", "smg" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_P90::WPN_NAME, CS16_P90::GetName(), CS16_P90::WPN_PRICE, "smg" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_P90::AMMO_NAME, CS16_P90::GetAmmoName(), CS16_P90::AMMO_PRICE, "ammo", "smg" ) );
-
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_FAMAS::WPN_NAME, CS16_FAMAS::GetName(), CS16_FAMAS::WPN_PRICE, "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_FAMAS::AMMO_NAME, CS16_FAMAS::GetAmmoName(), CS16_FAMAS::AMMO_PRICE, "ammo", "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_GALIL::WPN_NAME, CS16_GALIL::GetName(), CS16_GALIL::WPN_PRICE, "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_GALIL::AMMO_NAME, CS16_GALIL::GetAmmoName(), CS16_GALIL::AMMO_PRICE, "ammo", "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_AK47::WPN_NAME, CS16_AK47::GetName(), CS16_AK47::WPN_PRICE, "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_AK47::AMMO_NAME, CS16_AK47::GetAmmoName(), CS16_AK47::AMMO_PRICE, "ammo", "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_M4A1::WPN_NAME, CS16_M4A1::GetName(), CS16_M4A1::WPN_PRICE, "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_M4A1::AMMO_NAME, CS16_M4A1::GetAmmoName(), CS16_M4A1::AMMO_PRICE, "ammo", "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_AUG::WPN_NAME, CS16_AUG::GetName(), CS16_AUG::WPN_PRICE, "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_AUG::AMMO_NAME, CS16_AUG::GetAmmoName(), CS16_AUG::AMMO_PRICE, "ammo", "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_SG552::WPN_NAME, CS16_SG552::GetName(), CS16_SG552::WPN_PRICE, "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_SG552::AMMO_NAME, CS16_SG552::GetAmmoName(), CS16_SG552::AMMO_PRICE, "ammo", "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_SCOUT::WPN_NAME, CS16_SCOUT::GetName(), CS16_SCOUT::WPN_PRICE, "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_SCOUT::AMMO_NAME, CS16_SCOUT::GetAmmoName(), CS16_SCOUT::AMMO_PRICE, "ammo", "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_AWP::WPN_NAME, CS16_AWP::GetName(), CS16_AWP::WPN_PRICE, "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_AWP::AMMO_NAME, CS16_AWP::GetAmmoName(), CS16_AWP::AMMO_PRICE, "ammo", "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_SG550::WPN_NAME, CS16_SG550::GetName(), CS16_SG550::WPN_PRICE, "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_SG550::AMMO_NAME, CS16_SG550::GetAmmoName(), CS16_SG550::AMMO_PRICE, "ammo", "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_G3SG1::WPN_NAME, CS16_G3SG1::GetName(), CS16_G3SG1::WPN_PRICE, "rifle" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_G3SG1::AMMO_NAME, CS16_G3SG1::GetAmmoName(), CS16_G3SG1::AMMO_PRICE, "ammo", "rifle" ) );
-
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_M249::WPN_NAME, CS16_M249::GetName(), CS16_M249::WPN_PRICE, "lmg" ) );
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_M249::AMMO_NAME, CS16_M249::GetAmmoName(), CS16_M249::AMMO_PRICE, "ammo", "lmg" ) );
-
-    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_HEGRENADE::WPN_NAME, CS16_HEGRENADE::GetName(), CS16_HEGRENADE::WPN_PRICE, "equip" ) );
-
-    BuyMenu::MoneyInit();
 }
 
-void AddMoney( CBasePlayer@ p, int amount )
+string ItemText( Gun@ g ) { return g.label + "  $" + g.price; }
+
+CTextMenu@ MakeGunMenu( const string& in title, const string& in cat )
 {
-    BuyMenu::BuyMenuCVARS@ bm = @BuyMenu::BuyMenuCVARS();
-    string id = bm.PlayerID( p );
-    int cur = BuyMenu::BuyPoints.exists( id ) ? int( BuyMenu::BuyPoints[id] ) : 0;
-    cur += amount;
-    if( cur > BuyMenu::MaxMoney ) cur = BuyMenu::MaxMoney;
-    if( cur < 0 ) cur = 0;
-    BuyMenu::BuyPoints[id] = cur;
-    bm.ShowPointsSprite( p );
+    CTextMenu@ m = CTextMenu( TextMenuPlayerSlotCallback( @GunMenuCallback ) );
+    m.SetTitle( title + "\n" );
+    for( uint i = 0; i < g_Guns.length(); ++i )
+    {
+        if( g_Guns[i].cat != cat ) continue;
+        string txt = ItemText( g_Guns[i] );
+        g_MenuIndex[txt] = int( i );
+        m.AddItem( txt );
+    }
+    m.Register();
+    return m;
 }
+
+void BuildMenus()
+{
+    @g_MenuMain = CTextMenu( TextMenuPlayerSlotCallback( @MainMenuCallback ) );
+    g_MenuMain.SetTitle( "Buy Menu\n" );
+    g_MenuMain.AddItem( "Pistols" );
+    g_MenuMain.AddItem( "Shotguns" );
+    g_MenuMain.AddItem( "Sub-Machine Guns" );
+    g_MenuMain.AddItem( "Rifles" );
+    g_MenuMain.AddItem( "Machine Gun" );
+    g_MenuMain.AddItem( "Primary Ammo" );
+    g_MenuMain.AddItem( "Secondary Ammo" );
+    g_MenuMain.AddItem( "Equipment" );
+    g_MenuMain.Register();
+
+    @g_MenuPistol  = MakeGunMenu( "Pistols",          "pistol" );
+    @g_MenuShotgun = MakeGunMenu( "Shotguns",         "shotgun" );
+    @g_MenuSmg     = MakeGunMenu( "Sub-Machine Guns", "smg" );
+    @g_MenuRifle   = MakeGunMenu( "Rifles",           "rifle" );
+    @g_MenuMg      = MakeGunMenu( "Machine Gun",      "mg" );
+    @g_MenuEquip   = MakeGunMenu( "Equipment",        "equip" );
+}
+
+void MainMenuCallback( CTextMenu@ menu, CBasePlayer@ pPlayer, int iSlot, const CTextMenuItem@ pItem )
+{
+    if( pItem is null || pPlayer is null ) return;
+    if( !CanBuy( pPlayer ) ) return;
+    string c = pItem.m_szName;
+    if( c == "Pistols" )               g_MenuPistol.Open( 0, 0, pPlayer );
+    else if( c == "Shotguns" )         g_MenuShotgun.Open( 0, 0, pPlayer );
+    else if( c == "Sub-Machine Guns" ) g_MenuSmg.Open( 0, 0, pPlayer );
+    else if( c == "Rifles" )           g_MenuRifle.Open( 0, 0, pPlayer );
+    else if( c == "Machine Gun" )      g_MenuMg.Open( 0, 0, pPlayer );
+    else if( c == "Primary Ammo" )     BuyAmmo( pPlayer, SLOT_PRIMARY );
+    else if( c == "Secondary Ammo" )   BuyAmmo( pPlayer, SLOT_PISTOL );
+    else if( c == "Equipment" )        g_MenuEquip.Open( 0, 0, pPlayer );
+}
+
+void GunMenuCallback( CTextMenu@ menu, CBasePlayer@ pPlayer, int iSlot, const CTextMenuItem@ pItem )
+{
+    if( pItem is null || pPlayer is null ) return;
+    if( !g_MenuIndex.exists( pItem.m_szName ) ) return;
+    BuyGun( pPlayer, int( g_MenuIndex[pItem.m_szName] ) );
+}
+
+// ------------------------------------------------------------------ economy
+
+string PlayerKey( CBasePlayer@ p ) { return g_EngineFuncs.GetPlayerAuthId( p.edict() ); }
+
+int GetMoney( CBasePlayer@ p )
+{
+    string id = PlayerKey( p );
+    return g_Money.exists( id ) ? int( g_Money[id] ) : 0;
+}
+
+void SetMoney( CBasePlayer@ p, int v )
+{
+    if( v < 0 ) v = 0;
+    if( v > MAX_MONEY ) v = MAX_MONEY;
+    g_Money[PlayerKey( p )] = v;
+}
+
+void AddMoney( CBasePlayer@ p, int amount ) { SetMoney( p, GetMoney( p ) + amount ); }
 
 void AddMoneyAll( int amount )
 {
@@ -240,17 +328,187 @@ void AddMoneyAll( int amount )
     }
 }
 
-dictionary g_GotStartMoney;
+bool InBuyZone( CBasePlayer@ p )
+{
+    Vector o = p.pev.origin;
+    return o.x >= g_BuyMins.x && o.x <= g_BuyMaxs.x
+        && o.y >= g_BuyMins.y && o.y <= g_BuyMaxs.y
+        && o.z >= g_BuyMins.z && o.z <= g_BuyMaxs.z;
+}
+
+bool CanBuy( CBasePlayer@ p )
+{
+    if( !p.IsAlive() )
+    {
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "You are dead" );
+        return false;
+    }
+    if( !InBuyZone( p ) )
+    {
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "You can only buy in the spawn buy zone" );
+        return false;
+    }
+    return true;
+}
+
+void OpenBuyMenu( CBasePlayer@ p )
+{
+    if( p is null || !CanBuy( p ) ) return;
+    g_MenuMain.SetTitle( "Buy Menu   ($" + GetMoney( p ) + ")\n" );
+    g_MenuMain.Open( 0, 0, p );
+}
+
+Gun@ HeldGun( CBasePlayer@ p, GunSlot slot )
+{
+    for( uint i = 0; i < g_Guns.length(); ++i )
+    {
+        if( g_Guns[i].slot != slot ) continue;
+        if( p.HasNamedPlayerItem( g_Guns[i].cls ) !is null ) return g_Guns[i];
+    }
+    return null;
+}
+
+void BuyGun( CBasePlayer@ p, int idx )
+{
+    if( !CanBuy( p ) ) return;
+    Gun@ g = g_Guns[idx];
+    int money = GetMoney( p );
+    if( money < g.price )
+    {
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Not enough money: " + g.label + " costs $" + g.price );
+        return;
+    }
+    if( g.cls == "kevlar" )
+    {
+        if( p.pev.armorvalue >= 100 )
+        {
+            g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Armor is already full" );
+            return;
+        }
+        p.pev.armorvalue = 100;
+    }
+    else
+    {
+        if( g.slot != SLOT_NONE )
+        {
+            if( p.HasNamedPlayerItem( g.cls ) !is null )
+            {
+                g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "You already have a " + g.label );
+                return;
+            }
+            Gun@ old = HeldGun( p, g.slot );
+            if( old !is null )
+                p.DropItem( old.cls );        // CS style: the old gun of that slot goes on the floor
+        }
+        p.GiveNamedItem( g.cls );
+        if( g.slot != SLOT_NONE )
+            p.SelectItem( g.cls );
+    }
+    SetMoney( p, money - g.price );
+    g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Bought " + g.label + " for $" + g.price );
+}
+
+void BuyAmmo( CBasePlayer@ p, GunSlot slot )
+{
+    if( !CanBuy( p ) ) return;
+    Gun@ g = HeldGun( p, slot );
+    if( g is null || g.ammo.Length() == 0 )
+    {
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, slot == SLOT_PRIMARY ? "No primary weapon" : "No pistol" );
+        return;
+    }
+    int money = GetMoney( p );
+    if( money < g.ammoPrice )
+    {
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Not enough money: ammo costs $" + g.ammoPrice );
+        return;
+    }
+    p.GiveNamedItem( g.ammo );
+    SetMoney( p, money - g.ammoPrice );
+    g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + " ammo  -$" + g.ammoPrice );
+}
+
+// one pistol + one primary: drop extras picked up from the floor (keeps the active one)
+void EnforceSlots( CBasePlayer@ p )
+{
+    for( int s = int( SLOT_PISTOL ); s <= int( SLOT_PRIMARY ); ++s )
+    {
+        array<Gun@> held;
+        for( uint i = 0; i < g_Guns.length(); ++i )
+            if( int( g_Guns[i].slot ) == s && p.HasNamedPlayerItem( g_Guns[i].cls ) !is null )
+                held.insertLast( g_Guns[i] );
+        if( held.length() <= 1 ) continue;
+
+        string active = "";
+        CBaseEntity@ act = p.m_hActiveItem.GetEntity();
+        if( act !is null ) active = act.GetClassname();
+        bool keptOne = false;
+        for( uint i = 0; i < held.length(); ++i )
+        {
+            if( !keptOne && ( held[i].cls == active || i == held.length() - 1 ) ) { keptOne = true; continue; }
+            p.DropItem( held[i].cls );
+        }
+    }
+}
+
+// console commands: .buy  .buyammo1 (primary)  .buyammo2 (pistol)
+void CmdBuy( const CCommand@ args )      { OpenBuyMenu( g_ConCommandSystem.GetCurrentPlayer() ); }
+void CmdBuyAmmo1( const CCommand@ args ) { CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer(); if( p !is null ) BuyAmmo( p, SLOT_PRIMARY ); }
+void CmdBuyAmmo2( const CCommand@ args ) { CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer(); if( p !is null ) BuyAmmo( p, SLOT_PISTOL ); }
+
+CClientCommand g_CmdBuy( "buy", "Open the CS buy menu (spawn zone only)", @CmdBuy );
+CClientCommand g_CmdBuyAmmo1( "buyammo1", "Buy primary weapon ammo", @CmdBuyAmmo1 );
+CClientCommand g_CmdBuyAmmo2( "buyammo2", "Buy pistol ammo", @CmdBuyAmmo2 );
+
+HookReturnCode OnClientSay( SayParameters@ pParams )
+{
+    CBasePlayer@ p = pParams.GetPlayer();
+    const CCommand@ args = pParams.GetArguments();
+    if( p is null || args.ArgC() < 1 ) return HOOK_CONTINUE;
+    string a = args.Arg( 0 ).ToLowercase();
+    if( a == "buy" || a == "!buy" || a == "/buy" || a == ".buy" )
+    {
+        pParams.ShouldHide = true;
+        OpenBuyMenu( p );
+    }
+    else if( a == "!buyammo1" || a == "/buyammo1" ) { pParams.ShouldHide = true; BuyAmmo( p, SLOT_PRIMARY ); }
+    else if( a == "!buyammo2" || a == "/buyammo2" ) { pParams.ShouldHide = true; BuyAmmo( p, SLOT_PISTOL ); }
+    else if( a == "!money" ) { pParams.ShouldHide = true; g_PlayerFuncs.ClientPrint( p, HUD_PRINTTALK, "[PVE] You have $" + GetMoney( p ) + "\n" ); }
+    return HOOK_CONTINUE;
+}
+
+// who killed this monster? (bullets: inflictor = player; grenades: inflictor owned by player)
+CBasePlayer@ KillerOf( CBaseEntity@ e )
+{
+    edict_t@ inf = e.pev.dmg_inflictor;
+    if( inf is null ) return null;
+    CBaseEntity@ ie = g_EntityFuncs.Instance( inf );
+    if( ie is null ) return null;
+    if( ie.IsPlayer() ) return cast<CBasePlayer@>( ie );
+    if( ie.pev.owner !is null )
+    {
+        CBaseEntity@ o = g_EntityFuncs.Instance( ie.pev.owner );
+        if( o !is null && o.IsPlayer() ) return cast<CBasePlayer@>( o );
+    }
+    return null;
+}
 
 // ------------------------------------------------------------------ lifecycle
 
 void MapInit()
 {
     SetupCS16Weapons();
+    BuildGuns();
+    BuildMenus();
     BuildWaves();
     for( uint i = 0; i < g_Waves.length(); ++i )
         for( uint j = 0; j < g_Waves[i].spawns.length(); ++j )
             g_Game.PrecacheOther( g_Waves[i].spawns[j].cls );
+    for( uint i = 0; i < g_Guns.length(); ++i )
+    {
+        if( g_Guns[i].cls != "kevlar" ) g_Game.PrecacheOther( g_Guns[i].cls );
+        if( g_Guns[i].ammo.Length() > 0 ) g_Game.PrecacheOther( g_Guns[i].ammo );
+    }
 
     g_HudBig.channel = 4;
     g_HudBig.x = -1; g_HudBig.y = 0.25;
@@ -265,7 +523,14 @@ void MapInit()
     g_HudStatus.r1 = 200; g_HudStatus.g1 = 220; g_HudStatus.b1 = 255; g_HudStatus.a1 = 255;
     g_HudStatus.fadeinTime = 0.0; g_HudStatus.fadeoutTime = 0.2; g_HudStatus.holdTime = 1.2; g_HudStatus.fxTime = 0.0;
 
+    g_HudMoney.channel = 6;
+    g_HudMoney.x = 0.02; g_HudMoney.y = 0.80;
+    g_HudMoney.effect = 0;
+    g_HudMoney.r1 = 120; g_HudMoney.g1 = 255; g_HudMoney.b1 = 120; g_HudMoney.a1 = 255;
+    g_HudMoney.fadeinTime = 0.0; g_HudMoney.fadeoutTime = 0.2; g_HudMoney.holdTime = 1.2; g_HudMoney.fxTime = 0.0;
+
     g_Hooks.RegisterHook( Hooks::Player::PlayerSpawn, @OnPlayerSpawn );
+    g_Hooks.RegisterHook( Hooks::Player::ClientSay, @OnClientSay );
     g_Scheduler.SetInterval( "PveThink", THINK_INTERVAL, g_Scheduler.REPEAT_INFINITE_TIMES );
 }
 
@@ -277,8 +542,23 @@ void MapActivate()
     @e = null;
     while( ( @e = g_EntityFuncs.FindEntityByTargetname( e, "pve_flank" ) ) !is null )
         g_FlankSpawns.insertLast( e.pev.origin );
-    g_Game.AlertMessage( at_console, "[dust2_pve] spawns: main=%1 flank=%2 waves=%3\n",
-        g_MainSpawns.length(), g_FlankSpawns.length(), g_Waves.length() );
+
+    // buy zone: box around the player spawns
+    bool first = true;
+    @e = null;
+    while( ( @e = g_EntityFuncs.FindEntityByClassname( e, "info_player_start" ) ) !is null )
+    {
+        Vector o = e.pev.origin;
+        if( first ) { g_BuyMins = o; g_BuyMaxs = o; first = false; continue; }
+        if( o.x < g_BuyMins.x ) g_BuyMins.x = o.x;  if( o.x > g_BuyMaxs.x ) g_BuyMaxs.x = o.x;
+        if( o.y < g_BuyMins.y ) g_BuyMins.y = o.y;  if( o.y > g_BuyMaxs.y ) g_BuyMaxs.y = o.y;
+        if( o.z < g_BuyMins.z ) g_BuyMins.z = o.z;  if( o.z > g_BuyMaxs.z ) g_BuyMaxs.z = o.z;
+    }
+    g_BuyMins = g_BuyMins - Vector( BUYZONE_PAD, BUYZONE_PAD, 128 );
+    g_BuyMaxs = g_BuyMaxs + Vector( BUYZONE_PAD, BUYZONE_PAD, 128 );
+
+    g_Game.AlertMessage( at_console, "[dust2_pve] spawns: main=%1 flank=%2 waves=%3 guns=%4\n",
+        g_MainSpawns.length(), g_FlankSpawns.length(), g_Waves.length(), g_Guns.length() );
 }
 
 HookReturnCode OnPlayerSpawn( CBasePlayer@ pPlayer )
@@ -291,13 +571,13 @@ HookReturnCode OnPlayerSpawn( CBasePlayer@ pPlayer )
     }
     if( pPlayer !is null )
     {
-        string id = g_EngineFuncs.GetPlayerAuthId( pPlayer.edict() );
+        string id = PlayerKey( pPlayer );
         if( !g_GotStartMoney.exists( id ) )
         {
             g_GotStartMoney[id] = true;
             AddMoney( pPlayer, START_MONEY );
-            g_PlayerFuncs.ClientPrint( pPlayer, HUD_PRINTTALK, "[PVE] $" + START_MONEY + " start money. Say !buy to open the CS buy menu.\n" );
         }
+        g_PlayerFuncs.ClientPrint( pPlayer, HUD_PRINTTALK, "[PVE] $" + GetMoney( pPlayer ) + ". Buy at spawn: B (bind b .buy) or say buy. Ammo: , and . (buyammo1/2)\n" );
     }
     return HOOK_CONTINUE;
 }
@@ -343,7 +623,6 @@ CBasePlayer@ RandomAlivePlayer()
     return ps[ Math.RandomLong( 0, ps.length() - 1 ) ];
 }
 
-// pick a spawn point that is not right next to a player
 bool PickSpawn( bool allowFlank, Vector& out pos )
 {
     array<Vector> pool;
@@ -364,7 +643,6 @@ bool PickSpawn( bool allowFlank, Vector& out pos )
     return true;
 }
 
-// a spot in the pools closest to a given player (used to relocate stragglers)
 Vector SpawnNearPlayer( CBasePlayer@ p )
 {
     Vector best = g_MainSpawns.length() > 0 ? g_MainSpawns[0] : p.pev.origin;
@@ -387,7 +665,6 @@ void HealAll()
         CBasePlayer@ p = g_PlayerFuncs.FindPlayerByIndex( i );
         if( p is null || !p.IsConnected() || !p.IsAlive() ) continue;
         p.pev.health = p.pev.max_health;
-        if( p.pev.armorvalue < 50 ) p.pev.armorvalue = 50;
     }
 }
 
@@ -395,6 +672,19 @@ void Big( const string& in msg )
 {
     g_PlayerFuncs.HudMessageAll( g_HudBig, msg );
     g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[PVE] " + msg + "\n" );
+}
+
+void PlayerHud()
+{
+    for( int i = 1; i <= g_Engine.maxClients; ++i )
+    {
+        CBasePlayer@ p = g_PlayerFuncs.FindPlayerByIndex( i );
+        if( p is null || !p.IsConnected() ) continue;
+        string line = "$" + GetMoney( p );
+        if( p.IsAlive() && InBuyZone( p ) ) line += "   [BUY ZONE]  B / buy";
+        g_PlayerFuncs.HudMessage( p, g_HudMoney, line );
+        if( p.IsAlive() ) EnforceSlots( p );
+    }
 }
 
 // ------------------------------------------------------------------ waves
@@ -405,7 +695,7 @@ void StartWave( int idx )
     WaveDef@ w = g_Waves[idx];
     int players = CountPlayers( false );
     if( players < 1 ) players = 1;
-    float scale = 1.0f + 0.35f * float( players - 1 );   // 1 player = x1, 4 players = x2.05
+    float scale = 1.0f + 0.35f * float( players - 1 );
 
     g_Queue.resize( 0 );
     g_Alive.resize( 0 );
@@ -413,10 +703,9 @@ void StartWave( int idx )
     for( uint i = 0; i < w.spawns.length(); ++i )
     {
         int n = int( float( w.spawns[i].count ) * scale + 0.5f );
-        if( w.spawns[i].count == 1 ) n = 1;                 // bosses stay single
+        if( w.spawns[i].count == 1 ) n = 1;
         for( int k = 0; k < n; ++k ) g_Queue.insertLast( w.spawns[i].cls );
     }
-    // shuffle so types are mixed
     for( uint i = g_Queue.length(); i > 1; --i )
     {
         uint j = Math.RandomLong( 0, i - 1 );
@@ -439,11 +728,10 @@ void SpawnOne( const string& in cls, float healthMult, bool allowFlank )
     if( e is null ) return;
     g_EntityFuncs.DispatchSpawn( e.edict() );
 
-    e.SetClassification( CLASS_ALIEN_MILITARY );     // no in-fighting; everyone hates players
+    e.SetClassification( CLASS_ALIEN_MILITARY );
     e.pev.health = e.pev.health * healthMult;
     e.pev.max_health = e.pev.health;
 
-    // point it at a player straight away
     CBaseMonster@ m = e.MyMonsterPointer();
     if( m !is null )
     {
@@ -466,6 +754,15 @@ int PruneAndCountAlive()
         CBaseEntity@ e = g_Alive[i].GetEntity();
         if( e is null || !e.IsAlive() )
         {
+            if( e !is null )
+            {
+                CBasePlayer@ killer = KillerOf( e );
+                if( killer !is null )
+                {
+                    AddMoney( killer, KILL_REWARD );
+                    g_PlayerFuncs.ClientPrint( killer, HUD_PRINTCENTER, "+$" + KILL_REWARD );
+                }
+            }
             g_Alive.removeAt( i );
             g_IdleSecs.removeAt( i );
             continue;
@@ -500,7 +797,6 @@ void NudgeMonsters()
 
         if( g_IdleSecs[i] >= STRAGGLER_SECS && d > 1200.0f )
         {
-            // lost somewhere far away: bring it back into the fight
             Vector np = SpawnNearPlayer( p );
             np.z += 8.0f;
             g_EntityFuncs.SetOrigin( e, np );
@@ -528,7 +824,7 @@ void WaveCleared()
     HealAll();
     int bonus = WAVE_BONUS_BASE + WAVE_BONUS_PER * ( g_WaveIdx + 1 );
     AddMoneyAll( bonus );
-    g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[PVE] Wave bonus: $" + bonus + " to everyone. !buy to gear up.\n" );
+    g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[PVE] Wave bonus: $" + bonus + " to everyone. Go back to spawn to buy.\n" );
     bool last = ( g_WaveIdx + 1 >= int( g_Waves.length() ) );
     if( last )
     {
@@ -546,7 +842,6 @@ void WaveCleared()
 
 void RestartMap()
 {
-    // reload this same map; fall back to a normal map end (next map in cycle)
     dictionary keys;
     keys["map"] = string( g_Engine.mapname );
     keys["targetname"] = "pve_restart";
@@ -565,6 +860,8 @@ void RestartMap()
 
 void PveThink()
 {
+    PlayerHud();
+
     if( g_State == PVE_WAITING )
         return;
 
@@ -589,7 +886,6 @@ void PveThink()
         return;
     }
 
-    // PVE_WAVE
     WaveDef@ w = g_Waves[g_WaveIdx];
     int alive = PruneAndCountAlive();
 

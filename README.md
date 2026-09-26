@@ -43,7 +43,10 @@ wad copied over and its CS-only entities swapped out.
 - 10 themed waves (headcrabs → zombies → vortigaunts → soldiers → baby gargantua boss → … → gargantua)
 - monster count scales with player count; clearing a wave heals everyone and gives a 20 s break
 - monsters that never find a player are pushed onto the nearest one; a wave that drags on is force-cleared
-- CS 1.6 guns: start with knife + USP + M4A1 and $800; say `!buy` for AK-47, AWP, AUG, ...; score earns money and every cleared wave pays a bonus
+- Counter-Strike economy: knife + USP + $800 at start, $300 per kill, a bonus per cleared wave
+- buy only inside the spawn buy zone; one pistol + one primary (buying into a taken slot drops the old gun)
+- `bind b ".buy"`, `bind , ".buyammo1"` (primary ammo), `bind . ".buyammo2"` (pistol ammo); or say `buy` in chat
+- guns and prices are CS 1.6's (AK-47 $2500, M4A1 $3100, AWP $4750, AUG $3500, ...) via KernCore's weapon pack
 
 Tune constants at the top of `maps/dust2_pve/dust2_pve.as` or the wave table in `BuildWaves()`,
 rerun `cs2sven.py` (the BSP is only rewritten when it actually changes, so the node graph cache survives).

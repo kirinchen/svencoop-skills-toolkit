@@ -48,6 +48,12 @@
   key and `ShowPointsSprite(p)` refreshes the HUD. Default: $10 per score, max $16000.
 - Loadout lines in the map cfg accept the custom classnames (`weapon_m4a1`, `ammo_m4a1 3`).
 - Append `cs16_resources.res` to the map `.res` so clients download models/sounds.
+- We do NOT use the pack's BuyMenu (no buy zone / slot rules); dust2_pve.as has its own CS-rules
+  buy system: `CTextMenu` + `CClientCommand` (`.buy`, `.buyammo1`, `.buyammo2`), buy zone = box
+  around `info_player_start`, `HasNamedPlayerItem` / `DropItem` for the one-pistol-one-primary rule,
+  kill credit from `pev.dmg_inflictor` (bullets: the player; grenades: inflictor's owner).
+- Servers cannot push key binds (`cl_filterstuffcmd 1` is the client default): binds go in the
+  client's autoexec.cfg / MOTD.
 
 ## Headless validation with svends.exe
 - `svends.exe` needs the Steam client running **and** `SDL3.dll` from the Steam root on PATH,

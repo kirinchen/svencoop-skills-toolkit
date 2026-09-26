@@ -39,6 +39,8 @@ ap.add_argument('--max-nodes', type=int, default=900)
 ap.add_argument('--hl', default=os.path.join(STEAM, 'Half-Life'))
 ap.add_argument('--sven', default=os.path.join(STEAM, 'Sven Co-op'))
 ap.add_argument('--tools', default=None, help='cs16-bsp-mini/tools dir (bspents.py, reachlib.py)')
+ap.add_argument('--res-extra', action='append', default=[],
+                help='extra .res file(s) whose lines are appended to NAME.res (e.g. svencoop_addon/cs16_resources.res)')
 ap.add_argument('--dry-run', action='store_true')
 a = ap.parse_args()
 
@@ -179,4 +181,13 @@ if a.assets:
         if os.path.exists(p):
             shutil.copy(p, os.path.join(dst, fn))
             print('copied', fn)
+    if a.res_extra:
+        res_path = os.path.join(maps_dir, NAME + '.res')
+        lines = open(res_path, encoding='utf-8').read().splitlines() if os.path.exists(res_path) else []
+        for extra in a.res_extra:
+            for ln in open(extra, encoding='utf-8').read().splitlines():
+                if ln.strip() and not ln.startswith('//') and ln not in lines:
+                    lines.append(ln)
+        open(res_path, 'w', encoding='utf-8').write('\n'.join(lines) + '\n')
+        print('res merged:', len(lines), 'entries')
 print('written to', ADDON)

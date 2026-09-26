@@ -10,6 +10,7 @@ Sven Co-op with friends.
 
 | path | what |
 |---|---|
+| `tools/install_cs16_weapons.py` | installs KernCore's [CS 1.6 Weapons Project](https://github.com/KernCore91/-SC-Counter-Strike-1.6-Weapons-Project) (AK-47, M4A1, AWP, AUG, 30 guns + buy menu) into `svencoop_addon`; not vendored, its license forbids repacking |
 | `tools/cs2sven.py` | CS 1.6 `.bsp` → Sven Co-op PVE map: rewrites the entity lump, generates `info_node`s for monster path-finding, copies wads and per-map assets into `svencoop_addon` |
 | `maps/dust2_pve/` | the de_dust2 PVE map: wave script (`.as`), `.cfg`, `.res`, motd |
 | `.claude/skills/cs-map-to-sven-pve/` | Claude Code skill: the whole port workflow, including the headless validation run |
@@ -22,7 +23,8 @@ Depends on [cs16-bsp-mini](https://github.com/kirinchen/cs16-bsp-mini) (`tools/b
 
 ```
 git clone https://github.com/kirinchen/cs16-bsp-mini ../cs16-bsp-mini
-python tools/cs2sven.py "C:/Program Files (x86)/Steam/steamapps/common/Half-Life/cstrike/maps/de_dust2.bsp" dust2_pve --assets maps/dust2_pve
+python tools/install_cs16_weapons.py
+python tools/cs2sven.py "C:/Program Files (x86)/Steam/steamapps/common/Half-Life/cstrike/maps/de_dust2.bsp" dust2_pve --assets maps/dust2_pve --res-extra "C:/Program Files (x86)/Steam/steamapps/common/Sven Co-op/svencoop_addon/cs16_resources.res"
 ```
 
 Then in Sven Co-op: `map dust2_pve`. The first load builds the node graph (a few minutes for
@@ -41,7 +43,7 @@ wad copied over and its CS-only entities swapped out.
 - 10 themed waves (headcrabs → zombies → vortigaunts → soldiers → baby gargantua boss → … → gargantua)
 - monster count scales with player count; clearing a wave heals everyone and gives a 20 s break
 - monsters that never find a player are pushed onto the nearest one; a wave that drags on is force-cleared
-- loadout: crowbar, Desert Eagle, M16, shotgun, medkit
+- CS 1.6 guns: start with knife + USP + M4A1 and $800; say `!buy` for AK-47, AWP, AUG, ...; score earns money and every cleared wave pays a bonus
 
 Tune constants at the top of `maps/dust2_pve/dust2_pve.as` or the wave table in `BuildWaves()`,
 rerun `cs2sven.py` (the BSP is only rewritten when it actually changes, so the node graph cache survives).

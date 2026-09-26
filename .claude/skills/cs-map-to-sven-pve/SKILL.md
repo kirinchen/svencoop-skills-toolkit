@@ -29,6 +29,10 @@ repo (or `--tools PATH`). Read `docs/notes.md` first if anything Sven-specific i
    - `NAME.res` — wads the clients must download
    - `NAME_motd.txt`
 
+4b. **CS 1.6 guns (optional)**: `python tools/install_cs16_weapons.py`, keep the `#include "cs16/..."`
+   block and `SetupCS16Weapons()` from `dust2_pve.as`, use `weapon_m4a1` etc. in the cfg loadout and
+   pass `--res-extra .../svencoop_addon/cs16_resources.res` to the build.
+
 5. **Build**
    ```
    python tools/cs2sven.py MAP.bsp NAME --assets maps/NAME --dry-run   # check counts first

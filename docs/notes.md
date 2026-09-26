@@ -39,6 +39,16 @@
 - `HUDTextParams` fields: channel, x, y, effect, r1 g1 b1 a1, r2 g2 b2 a2, fadeinTime,
   fadeoutTime, holdTime, fxTime. `g_PlayerFuncs.HudMessageAll(params, text)`.
 
+## CS 1.6 weapons in Sven
+- KernCore's CS 1.6 Weapons Project is a plugin-or-map_script pack; its `cs16_register.as`
+  defines `MapInit()` itself, so it cannot be a second `map_script`. From your own map script:
+  `#include "cs16/weapons"`, `#include "cs16/BuyMenu"`, set the `CS16_*::POSITION` slots,
+  `RegisterAll()`, add `BuyMenu::BuyableItem`s to `g_CS16Menu`, then `BuyMenu::MoneyInit()`.
+- Money lives in `BuyMenu::BuyPoints[steamid]`; `BuyMenu::BuyMenuCVARS().PlayerID(p)` gives the
+  key and `ShowPointsSprite(p)` refreshes the HUD. Default: $10 per score, max $16000.
+- Loadout lines in the map cfg accept the custom classnames (`weapon_m4a1`, `ammo_m4a1 3`).
+- Append `cs16_resources.res` to the map `.res` so clients download models/sounds.
+
 ## Headless validation with svends.exe
 - `svends.exe` needs the Steam client running **and** `SDL3.dll` from the Steam root on PATH,
   otherwise: `Assertion Failed: Failed to load "SDL3.dll"` / `Unable to initialize Steam`.

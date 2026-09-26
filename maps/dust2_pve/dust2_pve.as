@@ -11,6 +11,15 @@
  *   that drags on too long is force-cleared so the game can never soft-lock
  */
 
+// Counter-Strike 1.6 weapons + buy menu (KernCore's CS 1.6 Weapons Project, installed by
+// tools/install_cs16_weapons.py). Chat "!buy" opens the menu; score earns money, waves pay a bonus.
+#include "cs16/weapons"
+#include "cs16/BuyMenu"
+
+const int   START_MONEY      = 800;     // handed out on a player's first spawn
+const int   WAVE_BONUS_BASE  = 400;     // wave-clear bonus = BASE + PER_WAVE * wave number
+const int   WAVE_BONUS_PER   = 250;
+
 const float THINK_INTERVAL   = 1.0f;
 const float START_COUNTDOWN  = 30.0f;   // seconds after the first player spawns
 const float WAVE_BREAK       = 20.0f;   // seconds between waves
@@ -127,10 +136,117 @@ void BuildWaves()
     AddWave( w );
 }
 
+// ------------------------------------------------------------------ CS 1.6 weapons
+
+// mirrors cs16/cs16_register.as (which cannot be a second map_script because it defines MapInit)
+void SetupCS16Weapons()
+{
+    // HUD slot positions so they do not collide with Sven's own weapons
+    CS16_KNIFE::POSITION     = 10;
+    CS16_GLOCK18::POSITION   = 10;  CS16_USP::POSITION   = 11;  CS16_P228::POSITION   = 12;
+    CS16_57::POSITION        = 13;  CS16_ELITES::POSITION = 14; CS16_DEAGLE::POSITION = 15;
+    CS16_M3::POSITION        = 10;  CS16_XM1014::POSITION = 11;
+    CS16_MAC10::POSITION     = 10;  CS16_TMP::POSITION   = 11;  CS16_MP5::POSITION    = 12;
+    CS16_UMP45::POSITION     = 13;  CS16_P90::POSITION   = 14;
+    CS16_FAMAS::POSITION     = 10;  CS16_GALIL::POSITION = 11;  CS16_AK47::POSITION   = 12;
+    CS16_M4A1::POSITION      = 13;  CS16_AUG::POSITION   = 14;  CS16_SG552::POSITION  = 15;
+    CS16_SCOUT::POSITION     = 10;  CS16_AWP::POSITION   = 11;  CS16_SG550::POSITION  = 12;
+    CS16_G3SG1::POSITION     = 13;
+    CS16_M249::POSITION      = 10;
+    CS16_HEGRENADE::POSITION = 10;  CS16_C4::POSITION    = 11;
+
+    g_CS16Menu.RemoveItems();
+    RegisterAll();
+
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_KNIFE::WPN_NAME, CS16_KNIFE::GetName(), CS16_KNIFE::WPN_PRICE, "melee" ) );
+
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_GLOCK18::WPN_NAME, CS16_GLOCK18::GetName(), CS16_GLOCK18::WPN_PRICE, "handgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_GLOCK18::AMMO_NAME, CS16_GLOCK18::GetAmmoName(), CS16_GLOCK18::AMMO_PRICE, "ammo", "handgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_USP::WPN_NAME, CS16_USP::GetName(), CS16_USP::WPN_PRICE, "handgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_USP::AMMO_NAME, CS16_USP::GetAmmoName(), CS16_USP::AMMO_PRICE, "ammo", "handgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_P228::WPN_NAME, CS16_P228::GetName(), CS16_P228::WPN_PRICE, "handgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_P228::AMMO_NAME, CS16_P228::GetAmmoName(), CS16_P228::AMMO_PRICE, "ammo", "handgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_57::WPN_NAME, CS16_57::GetName(), CS16_57::WPN_PRICE, "handgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_57::AMMO_NAME, CS16_57::GetAmmoName(), CS16_57::AMMO_PRICE, "ammo", "handgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_ELITES::WPN_NAME, CS16_ELITES::GetName(), CS16_ELITES::WPN_PRICE, "handgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_ELITES::AMMO_NAME, CS16_ELITES::GetAmmoName(), CS16_ELITES::AMMO_PRICE, "ammo", "handgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_DEAGLE::WPN_NAME, CS16_DEAGLE::GetName(), CS16_DEAGLE::WPN_PRICE, "handgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_DEAGLE::AMMO_NAME, CS16_DEAGLE::GetAmmoName(), CS16_DEAGLE::AMMO_PRICE, "ammo", "handgun" ) );
+
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_M3::WPN_NAME, CS16_M3::GetName(), CS16_M3::WPN_PRICE, "shotgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_M3::AMMO_NAME, CS16_M3::GetAmmoName(), CS16_M3::AMMO_PRICE, "ammo", "shotgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_XM1014::WPN_NAME, CS16_XM1014::GetName(), CS16_XM1014::WPN_PRICE, "shotgun" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_XM1014::AMMO_NAME, CS16_XM1014::GetAmmoName(), CS16_XM1014::AMMO_PRICE, "ammo", "shotgun" ) );
+
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_MAC10::WPN_NAME, CS16_MAC10::GetName(), CS16_MAC10::WPN_PRICE, "smg" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_MAC10::AMMO_NAME, CS16_MAC10::GetAmmoName(), CS16_MAC10::AMMO_PRICE, "ammo", "smg" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_TMP::WPN_NAME, CS16_TMP::GetName(), CS16_TMP::WPN_PRICE, "smg" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_TMP::AMMO_NAME, CS16_TMP::GetAmmoName(), CS16_TMP::AMMO_PRICE, "ammo", "smg" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_MP5::WPN_NAME, CS16_MP5::GetName(), CS16_MP5::WPN_PRICE, "smg" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_MP5::AMMO_NAME, CS16_MP5::GetAmmoName(), CS16_MP5::AMMO_PRICE, "ammo", "smg" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_UMP45::WPN_NAME, CS16_UMP45::GetName(), CS16_UMP45::WPN_PRICE, "smg" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_UMP45::AMMO_NAME, CS16_UMP45::GetAmmoName(), CS16_UMP45::AMMO_PRICE, "ammo", "smg" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_P90::WPN_NAME, CS16_P90::GetName(), CS16_P90::WPN_PRICE, "smg" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_P90::AMMO_NAME, CS16_P90::GetAmmoName(), CS16_P90::AMMO_PRICE, "ammo", "smg" ) );
+
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_FAMAS::WPN_NAME, CS16_FAMAS::GetName(), CS16_FAMAS::WPN_PRICE, "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_FAMAS::AMMO_NAME, CS16_FAMAS::GetAmmoName(), CS16_FAMAS::AMMO_PRICE, "ammo", "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_GALIL::WPN_NAME, CS16_GALIL::GetName(), CS16_GALIL::WPN_PRICE, "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_GALIL::AMMO_NAME, CS16_GALIL::GetAmmoName(), CS16_GALIL::AMMO_PRICE, "ammo", "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_AK47::WPN_NAME, CS16_AK47::GetName(), CS16_AK47::WPN_PRICE, "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_AK47::AMMO_NAME, CS16_AK47::GetAmmoName(), CS16_AK47::AMMO_PRICE, "ammo", "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_M4A1::WPN_NAME, CS16_M4A1::GetName(), CS16_M4A1::WPN_PRICE, "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_M4A1::AMMO_NAME, CS16_M4A1::GetAmmoName(), CS16_M4A1::AMMO_PRICE, "ammo", "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_AUG::WPN_NAME, CS16_AUG::GetName(), CS16_AUG::WPN_PRICE, "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_AUG::AMMO_NAME, CS16_AUG::GetAmmoName(), CS16_AUG::AMMO_PRICE, "ammo", "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_SG552::WPN_NAME, CS16_SG552::GetName(), CS16_SG552::WPN_PRICE, "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_SG552::AMMO_NAME, CS16_SG552::GetAmmoName(), CS16_SG552::AMMO_PRICE, "ammo", "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_SCOUT::WPN_NAME, CS16_SCOUT::GetName(), CS16_SCOUT::WPN_PRICE, "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_SCOUT::AMMO_NAME, CS16_SCOUT::GetAmmoName(), CS16_SCOUT::AMMO_PRICE, "ammo", "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_AWP::WPN_NAME, CS16_AWP::GetName(), CS16_AWP::WPN_PRICE, "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_AWP::AMMO_NAME, CS16_AWP::GetAmmoName(), CS16_AWP::AMMO_PRICE, "ammo", "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_SG550::WPN_NAME, CS16_SG550::GetName(), CS16_SG550::WPN_PRICE, "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_SG550::AMMO_NAME, CS16_SG550::GetAmmoName(), CS16_SG550::AMMO_PRICE, "ammo", "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_G3SG1::WPN_NAME, CS16_G3SG1::GetName(), CS16_G3SG1::WPN_PRICE, "rifle" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_G3SG1::AMMO_NAME, CS16_G3SG1::GetAmmoName(), CS16_G3SG1::AMMO_PRICE, "ammo", "rifle" ) );
+
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_M249::WPN_NAME, CS16_M249::GetName(), CS16_M249::WPN_PRICE, "lmg" ) );
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_M249::AMMO_NAME, CS16_M249::GetAmmoName(), CS16_M249::AMMO_PRICE, "ammo", "lmg" ) );
+
+    g_CS16Menu.AddItem( BuyMenu::BuyableItem( CS16_HEGRENADE::WPN_NAME, CS16_HEGRENADE::GetName(), CS16_HEGRENADE::WPN_PRICE, "equip" ) );
+
+    BuyMenu::MoneyInit();
+}
+
+void AddMoney( CBasePlayer@ p, int amount )
+{
+    BuyMenu::BuyMenuCVARS@ bm = @BuyMenu::BuyMenuCVARS();
+    string id = bm.PlayerID( p );
+    int cur = BuyMenu::BuyPoints.exists( id ) ? int( BuyMenu::BuyPoints[id] ) : 0;
+    cur += amount;
+    if( cur > BuyMenu::MaxMoney ) cur = BuyMenu::MaxMoney;
+    if( cur < 0 ) cur = 0;
+    BuyMenu::BuyPoints[id] = cur;
+    bm.ShowPointsSprite( p );
+}
+
+void AddMoneyAll( int amount )
+{
+    for( int i = 1; i <= g_Engine.maxClients; ++i )
+    {
+        CBasePlayer@ p = g_PlayerFuncs.FindPlayerByIndex( i );
+        if( p is null || !p.IsConnected() ) continue;
+        AddMoney( p, amount );
+    }
+}
+
+dictionary g_GotStartMoney;
+
 // ------------------------------------------------------------------ lifecycle
 
 void MapInit()
 {
+    SetupCS16Weapons();
     BuildWaves();
     for( uint i = 0; i < g_Waves.length(); ++i )
         for( uint j = 0; j < g_Waves[i].spawns.length(); ++j )
@@ -172,6 +288,16 @@ HookReturnCode OnPlayerSpawn( CBasePlayer@ pPlayer )
         g_State = PVE_COUNTDOWN;
         g_Timer = START_COUNTDOWN;
         g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[PVE] First wave in " + int( START_COUNTDOWN ) + " seconds. Hold the CT side!\n" );
+    }
+    if( pPlayer !is null )
+    {
+        string id = g_EngineFuncs.GetPlayerAuthId( pPlayer.edict() );
+        if( !g_GotStartMoney.exists( id ) )
+        {
+            g_GotStartMoney[id] = true;
+            AddMoney( pPlayer, START_MONEY );
+            g_PlayerFuncs.ClientPrint( pPlayer, HUD_PRINTTALK, "[PVE] $" + START_MONEY + " start money. Say !buy to open the CS buy menu.\n" );
+        }
     }
     return HOOK_CONTINUE;
 }
@@ -400,6 +526,9 @@ void ClearRemaining()
 void WaveCleared()
 {
     HealAll();
+    int bonus = WAVE_BONUS_BASE + WAVE_BONUS_PER * ( g_WaveIdx + 1 );
+    AddMoneyAll( bonus );
+    g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[PVE] Wave bonus: $" + bonus + " to everyone. !buy to gear up.\n" );
     bool last = ( g_WaveIdx + 1 >= int( g_Waves.length() ) );
     if( last )
     {

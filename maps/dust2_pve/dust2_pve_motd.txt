@@ -1,0 +1,6 @@
+de_dust2 PVE - Monster Survival
+
+Hold the map together against 10 waves of monsters.
+Monsters come from the T-side; later waves also flank from the bomb sites.
+Clear a wave to get healed and a short break before the next one.
+Wave 5 and wave 10 are boss waves.

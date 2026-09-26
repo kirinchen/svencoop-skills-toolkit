@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.bsp
+*.nod
+*.nrp
+*.wad

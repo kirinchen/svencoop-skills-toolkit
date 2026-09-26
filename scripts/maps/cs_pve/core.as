@@ -26,7 +26,14 @@ const int   WAVE_BONUS_BASE  = 1000;    // wave-clear bonus = BASE + PER * wave 
 const int   WAVE_BONUS_PER   = 250;
 const int   MAX_MONEY        = 16000;
 const int   KEVLAR_PRICE     = 650;
-const float BUYZONE_PAD      = 320.0f;  // buy zone = box around the CT spawns + this padding
+const float BUYZONE_PAD      = 320.0f;  // fallback buy zone (no stations): box around the CT spawns + padding
+
+// buy stations: crates spawned at the CT spawn; press E next to one to open the buy menu
+const string STATION_MODEL   = "models/mil_crate.mdl";
+const string STATION_SPRITE  = "sprites/flare1.spr";
+const int    STATION_COUNT   = 3;
+const float  STATION_USE_DIST = 128.0f; // E works within this distance of a crate
+const float  STATION_BUY_DIST = 256.0f; // the buy zone around each crate (for B / chat buy)
 
 const float THINK_INTERVAL   = 1.0f;
 const float START_COUNTDOWN  = 30.0f;   // seconds after the first player spawns
@@ -89,7 +96,9 @@ array<WaveDef@> g_Waves;
 array<Gun@>     g_Guns;
 array<Vector>   g_MainSpawns;
 array<Vector>   g_FlankSpawns;
+array<Vector>   g_Stations;
 Vector          g_BuyMins, g_BuyMaxs;
+dictionary      g_LastUse;   // steamid -> float, E-key debounce
 
 PveState g_State = PVE_WAITING;
 float    g_Timer = 0.0f;
@@ -269,9 +278,22 @@ void AddMoneyAll( int amount )
     }
 }
 
+float NearestStationDist( const Vector& in o )
+{
+    float best = 999999.0f;
+    for( uint i = 0; i < g_Stations.length(); ++i )
+    {
+        float d = ( g_Stations[i] - o ).Length();
+        if( d < best ) best = d;
+    }
+    return best;
+}
+
 bool InBuyZone( CBasePlayer@ p )
 {
     Vector o = p.pev.origin;
+    if( g_Stations.length() > 0 )
+        return NearestStationDist( o ) <= STATION_BUY_DIST;
     return o.x >= g_BuyMins.x && o.x <= g_BuyMaxs.x
         && o.y >= g_BuyMins.y && o.y <= g_BuyMaxs.y
         && o.z >= g_BuyMins.z && o.z <= g_BuyMaxs.z;
@@ -286,10 +308,99 @@ bool CanBuy( CBasePlayer@ p )
     }
     if( !InBuyZone( p ) )
     {
-        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "You can only buy in the spawn buy zone" );
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g_Stations.length() > 0 ? "Buy at a weapon crate in spawn (press E on it)" : "You can only buy in the spawn buy zone" );
         return false;
     }
     return true;
+}
+
+// E on a weapon crate opens the buy menu
+HookReturnCode OnPlayerUse( CBasePlayer@ pPlayer, uint& out uiFlags )
+{
+    if( pPlayer is null || ( pPlayer.m_afButtonPressed & IN_USE ) == 0 ) return HOOK_CONTINUE;
+    if( g_Stations.length() == 0 || !pPlayer.IsAlive() ) return HOOK_CONTINUE;
+    if( NearestStationDist( pPlayer.pev.origin ) > STATION_USE_DIST ) return HOOK_CONTINUE;
+
+    string id = PlayerKey( pPlayer );
+    float last = g_LastUse.exists( id ) ? float( g_LastUse[id] ) : -10.0f;
+    if( g_Engine.time - last < 0.5f ) return HOOK_CONTINUE;
+    g_LastUse[id] = g_Engine.time;
+
+    uiFlags |= PlrHook_SkipUse;
+    OpenBuyMenu( pPlayer );
+    return HOOK_CONTINUE;
+}
+
+Vector FloorAt( const Vector& in p )
+{
+    TraceResult tr;
+    g_Utility.TraceLine( p + Vector( 0, 0, 16 ), p - Vector( 0, 0, 256 ), ignore_monsters, null, tr );
+    return tr.flFraction < 1.0f ? tr.vecEndPos : p;
+}
+
+// place STATION_COUNT crates on spawn points spread as far apart as possible
+void SpawnBuyStations( const array<Vector>& in spawns, const array<float>& in yaws )
+{
+    if( spawns.length() == 0 ) return;
+    Vector c( 0, 0, 0 );
+    for( uint i = 0; i < spawns.length(); ++i ) c = c + spawns[i];
+    c = c * ( 1.0f / float( spawns.length() ) );
+
+    array<int> chosen;
+    int firstIdx = 0; float bd = 999999.0f;
+    for( uint i = 0; i < spawns.length(); ++i )
+    {
+        float d = ( spawns[i] - c ).Length();
+        if( d < bd ) { bd = d; firstIdx = int( i ); }
+    }
+    chosen.insertLast( firstIdx );
+    while( int( chosen.length() ) < STATION_COUNT && chosen.length() < spawns.length() )
+    {
+        int bestI = -1; float bestD = -1.0f;
+        for( uint i = 0; i < spawns.length(); ++i )
+        {
+            if( chosen.find( int( i ) ) >= 0 ) continue;
+            float dmin = 999999.0f;
+            for( uint k = 0; k < chosen.length(); ++k )
+            {
+                float d = ( spawns[i] - spawns[chosen[k]] ).Length();
+                if( d < dmin ) dmin = d;
+            }
+            if( dmin > bestD ) { bestD = dmin; bestI = int( i ); }
+        }
+        if( bestI < 0 ) break;
+        chosen.insertLast( bestI );
+    }
+
+    for( uint k = 0; k < chosen.length(); ++k )
+    {
+        int i = chosen[k];
+        // 72 units in front of the spawn point so nobody spawns inside the crate
+        float yaw = yaws[i] * 0.0174533f;
+        Vector fwd( cos( yaw ), sin( yaw ), 0 );
+        Vector pos = FloorAt( spawns[i] + fwd * 72.0f );
+
+        dictionary kv;
+        kv["origin"] = string( pos.x ) + " " + string( pos.y ) + " " + string( pos.z );
+        kv["angles"] = "0 " + string( yaws[i] + 180.0f ) + " 0";
+        kv["model"] = STATION_MODEL;
+        kv["targetname"] = "pve_buystation";
+        CBaseEntity@ crate = g_EntityFuncs.CreateEntity( "item_generic", kv, true );
+        if( crate is null ) continue;
+        g_Stations.insertLast( pos );
+
+        dictionary sp;
+        Vector sPos = pos + Vector( 0, 0, 56 );
+        sp["origin"] = string( sPos.x ) + " " + string( sPos.y ) + " " + string( sPos.z );
+        sp["model"] = STATION_SPRITE;
+        sp["rendermode"] = "5";
+        sp["renderamt"] = "180";
+        sp["rendercolor"] = "255 200 60";
+        sp["scale"] = "0.35";
+        sp["spawnflags"] = "1";
+        g_EntityFuncs.CreateEntity( "env_sprite", sp, true );
+    }
+    g_Game.AlertMessage( at_console, "[cs_pve] buy stations: %1\n", g_Stations.length() );
 }
 
 void OpenBuyMenu( CBasePlayer@ p )
@@ -470,8 +581,12 @@ void PveMapInit()
     g_HudMoney.r1 = 120; g_HudMoney.g1 = 255; g_HudMoney.b1 = 120; g_HudMoney.a1 = 255;
     g_HudMoney.fadeinTime = 0.0; g_HudMoney.fadeoutTime = 0.2; g_HudMoney.holdTime = 1.2; g_HudMoney.fxTime = 0.0;
 
+    g_Game.PrecacheModel( STATION_MODEL );
+    g_Game.PrecacheModel( STATION_SPRITE );
+
     g_Hooks.RegisterHook( Hooks::Player::PlayerSpawn, @OnPlayerSpawn );
     g_Hooks.RegisterHook( Hooks::Player::ClientSay, @OnClientSay );
+    g_Hooks.RegisterHook( Hooks::Player::PlayerUse, @OnPlayerUse );
     g_Scheduler.SetInterval( "PveThink", THINK_INTERVAL, g_Scheduler.REPEAT_INFINITE_TIMES );
 }
 
@@ -484,12 +599,16 @@ void PveMapActivate()
     while( ( @e = g_EntityFuncs.FindEntityByTargetname( e, "pve_flank" ) ) !is null )
         g_FlankSpawns.insertLast( e.pev.origin );
 
-    // buy zone: box around the player spawns
+    // buy zone: box around the player spawns (fallback) + weapon crates at the spawns
+    array<Vector> spawns;
+    array<float> yaws;
     bool first = true;
     @e = null;
     while( ( @e = g_EntityFuncs.FindEntityByClassname( e, "info_player_start" ) ) !is null )
     {
         Vector o = e.pev.origin;
+        spawns.insertLast( o );
+        yaws.insertLast( e.pev.angles.y );
         if( first ) { g_BuyMins = o; g_BuyMaxs = o; first = false; continue; }
         if( o.x < g_BuyMins.x ) g_BuyMins.x = o.x;  if( o.x > g_BuyMaxs.x ) g_BuyMaxs.x = o.x;
         if( o.y < g_BuyMins.y ) g_BuyMins.y = o.y;  if( o.y > g_BuyMaxs.y ) g_BuyMaxs.y = o.y;
@@ -497,6 +616,7 @@ void PveMapActivate()
     }
     g_BuyMins = g_BuyMins - Vector( BUYZONE_PAD, BUYZONE_PAD, 128 );
     g_BuyMaxs = g_BuyMaxs + Vector( BUYZONE_PAD, BUYZONE_PAD, 128 );
+    SpawnBuyStations( spawns, yaws );
 
     g_Game.AlertMessage( at_console, "[cs_pve] spawns: main=%1 flank=%2 waves=%3 guns=%4\n",
         g_MainSpawns.length(), g_FlankSpawns.length(), g_Waves.length(), g_Guns.length() );
@@ -622,7 +742,7 @@ void PlayerHud()
         CBasePlayer@ p = g_PlayerFuncs.FindPlayerByIndex( i );
         if( p is null || !p.IsConnected() ) continue;
         string line = "$" + GetMoney( p );
-        if( p.IsAlive() && InBuyZone( p ) ) line += "   [BUY ZONE]  B / buy";
+        if( p.IsAlive() && InBuyZone( p ) ) line += ( g_Stations.length() > 0 ) ? "   [BUY ZONE]  E on crate / B" : "   [BUY ZONE]  B / buy";
         g_PlayerFuncs.HudMessage( p, g_HudMoney, line );
         if( p.IsAlive() ) EnforceSlots( p );
     }

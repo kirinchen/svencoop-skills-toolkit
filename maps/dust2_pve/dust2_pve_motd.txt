@@ -7,10 +7,10 @@ Wave 5 and wave 10 are boss waves.
 
 BUYING (Counter-Strike rules)
 - You start with a knife, a USP and $800. Kills pay $300, wave clears pay a bonus.
-- Buy only inside the spawn buy zone (the HUD shows [BUY ZONE]).
+- Walk up to a weapon crate in spawn and press E to buy (the HUD shows [BUY ZONE]).
 - One pistol + one primary. Buying into a taken slot drops the old gun.
 
-Bind once in console (Sven has no default buy key):
+Optional binds (E on a crate already works):
   bind b ".buy"
   bind , ".buyammo1"    (primary ammo)
   bind . ".buyammo2"    (pistol ammo)

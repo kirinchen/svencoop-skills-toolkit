@@ -12,7 +12,9 @@ Sven Co-op with friends.
 |---|---|
 | `tools/install_cs16_weapons.py` | installs KernCore's [CS 1.6 Weapons Project](https://github.com/KernCore91/-SC-Counter-Strike-1.6-Weapons-Project) (AK-47, M4A1, AWP, AUG, 30 guns + buy menu) into `svencoop_addon`; not vendored, its license forbids repacking |
 | `tools/cs2sven.py` | CS 1.6 `.bsp` → Sven Co-op PVE map: rewrites the entity lump, generates `info_node`s for monster path-finding, copies wads and per-map assets into `svencoop_addon` |
-| `maps/dust2_pve/` | the de_dust2 PVE map: wave script (`.as`), `.cfg`, `.res`, motd |
+| `scripts/maps/cs_pve/core.as` | the shared game logic: waves, monster AI nudging, CS economy and buy menu; every map script includes it |
+| `maps/dust2_pve/` | de_dust2 PVE: wave table (`.as`), `.cfg`, `.res`, motd |
+| `maps/bloodstrike_pve/` | cs_bloodstrike PVE: small arena, lighter waves |
 | `.claude/skills/cs-map-to-sven-pve/` | Claude Code skill: the whole port workflow, including the headless validation run |
 | `docs/notes.md` | Sven Co-op facts and pitfalls learned the hard way (map_script location, node graph, `svends.exe` + SDL3.dll, AngelScript API) |
 
@@ -27,7 +29,7 @@ python tools/install_cs16_weapons.py
 python tools/cs2sven.py "C:/Program Files (x86)/Steam/steamapps/common/Half-Life/cstrike/maps/de_dust2.bsp" dust2_pve --assets maps/dust2_pve --res-extra "C:/Program Files (x86)/Steam/steamapps/common/Sven Co-op/svencoop_addon/cs16_resources.res"
 ```
 
-Then in Sven Co-op: `map dust2_pve`. The first load builds the node graph (a few minutes for
+Then in Sven Co-op: `map dust2_pve` (or `map bloodstrike_pve`). The first load builds the node graph (a few minutes for
 ~700 nodes); it is cached in `svencoop/maps/graphs/`.
 
 ## Why Sven Co-op and not CS 1.6

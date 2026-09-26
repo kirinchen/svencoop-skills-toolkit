@@ -25,7 +25,8 @@ repo (or `--tools PATH`). Read `docs/notes.md` first if anything Sven-specific i
 
 4. **Create the per-map assets** in `maps/NAME/` (copy `maps/dust2_pve/` and rename):
    - `NAME.cfg` — must contain `map_script NAME`, the loadout and cvars
-   - `NAME.as` — wave script; edit `BuildWaves()` and the constants at the top
+   - `NAME.as` — only `#include "cs_pve/core"`, `MapInit()/MapActivate()` forwarders and `BuildWaves()`;
+     all generic logic (waves, economy, buy menu) is in `scripts/maps/cs_pve/core.as`, copied by the build
    - `NAME.res` — wads the clients must download
    - `NAME_motd.txt`
 

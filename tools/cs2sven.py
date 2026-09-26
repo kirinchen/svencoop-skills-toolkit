@@ -172,6 +172,12 @@ for w in wads:
     shutil.copy(src, os.path.join(ADDON, w))
     print('copied wad', w)
 
+# shared scripts (repo/scripts/maps/** -> svencoop_addon/scripts/maps/**)
+shared = os.path.normpath(os.path.join(HERE, '..', 'scripts', 'maps'))
+if os.path.isdir(shared):
+    shutil.copytree(shared, scripts_dir, dirs_exist_ok=True)
+    print('copied shared scripts from', shared)
+
 # per-map assets
 if a.assets:
     for fn, dst in ((NAME + '.cfg', maps_dir), (NAME + '.res', maps_dir),

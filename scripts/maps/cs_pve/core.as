@@ -28,8 +28,9 @@ const int   MAX_MONEY        = 16000;
 const int   KEVLAR_PRICE     = 650;
 const float BUYZONE_PAD      = 320.0f;  // fallback buy zone (no stations): box around the CT spawns + padding
 
-// buy stations: crates spawned at the CT spawn; press E next to one to open the buy menu
-const string STATION_MODEL   = "models/mil_crate.mdl";
+// buy stations: arms-dealer NPCs standing at the CT spawn; press E next to one to open the buy menu
+const string STATION_MODEL   = "models/hgrunt_opfor.mdl";
+const string STATION_NAME    = "Arms Dealer";
 const string STATION_SPRITE  = "sprites/flare1.spr";
 const int    STATION_COUNT   = 3;
 const float  STATION_USE_DIST = 128.0f; // E works within this distance of a crate
@@ -308,7 +309,7 @@ bool CanBuy( CBasePlayer@ p )
     }
     if( !InBuyZone( p ) )
     {
-        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g_Stations.length() > 0 ? "Buy at a weapon crate in spawn (press E on it)" : "You can only buy in the spawn buy zone" );
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g_Stations.length() > 0 ? "Buy from the Arms Dealer in spawn (press E on him)" : "You can only buy in the spawn buy zone" );
         return false;
     }
     return true;
@@ -380,23 +381,39 @@ void SpawnBuyStations( const array<Vector>& in spawns, const array<float>& in ya
         Vector fwd( cos( yaw ), sin( yaw ), 0 );
         Vector pos = FloorAt( spawns[i] + fwd * 72.0f );
 
+        // a non-AI display NPC (monster_generic): never moves, never fights, cannot die
         dictionary kv;
-        kv["origin"] = string( pos.x ) + " " + string( pos.y ) + " " + string( pos.z );
-        kv["angles"] = "0 " + string( yaws[i] + 180.0f ) + " 0";
+        kv["origin"] = string( pos.x ) + " " + string( pos.y ) + " " + string( pos.z + 37.0f );
+        kv["angles"] = "0 " + string( yaws[i] + 180.0f ) + " 0";   // faces the spawn point
         kv["model"] = STATION_MODEL;
+        kv["displayname"] = STATION_NAME;
         kv["targetname"] = "pve_buystation";
-        CBaseEntity@ crate = g_EntityFuncs.CreateEntity( "item_generic", kv, true );
-        if( crate is null ) continue;
+        kv["disableai"] = "1";
+        CBaseEntity@ npc = g_EntityFuncs.CreateEntity( "monster_generic", kv, true );
+        if( npc is null ) continue;
+        npc.pev.takedamage = DAMAGE_NO;
+        npc.pev.health = 1000000;
+        CBaseAnimating@ anim = cast<CBaseAnimating@>( npc );
+        if( anim !is null )
+        {
+            int seq = anim.LookupSequence( "idle1" );
+            if( seq >= 0 )
+            {
+                npc.pev.sequence = seq;
+                npc.pev.frame = 0;
+                anim.ResetSequenceInfo();
+            }
+        }
         g_Stations.insertLast( pos );
 
         dictionary sp;
-        Vector sPos = pos + Vector( 0, 0, 56 );
+        Vector sPos = pos + Vector( 0, 0, 96 );
         sp["origin"] = string( sPos.x ) + " " + string( sPos.y ) + " " + string( sPos.z );
         sp["model"] = STATION_SPRITE;
         sp["rendermode"] = "5";
         sp["renderamt"] = "180";
         sp["rendercolor"] = "255 200 60";
-        sp["scale"] = "0.35";
+        sp["scale"] = "0.25";
         sp["spawnflags"] = "1";
         g_EntityFuncs.CreateEntity( "env_sprite", sp, true );
     }
@@ -742,7 +759,7 @@ void PlayerHud()
         CBasePlayer@ p = g_PlayerFuncs.FindPlayerByIndex( i );
         if( p is null || !p.IsConnected() ) continue;
         string line = "$" + GetMoney( p );
-        if( p.IsAlive() && InBuyZone( p ) ) line += ( g_Stations.length() > 0 ) ? "   [BUY ZONE]  E on crate / B" : "   [BUY ZONE]  B / buy";
+        if( p.IsAlive() && InBuyZone( p ) ) line += ( g_Stations.length() > 0 ) ? "   [BUY ZONE]  E on dealer / B" : "   [BUY ZONE]  B / buy";
         g_PlayerFuncs.HudMessage( p, g_HudMoney, line );
         if( p.IsAlive() ) EnforceSlots( p );
     }

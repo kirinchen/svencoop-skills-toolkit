@@ -52,8 +52,8 @@
   buy system: `CTextMenu` + `CClientCommand` (`.buy`, `.buyammo1`, `.buyammo2`), buy zone = box
   around `info_player_start`, `HasNamedPlayerItem` / `DropItem` for the one-pistol-one-primary rule,
   kill credit from `pev.dmg_inflictor` (bullets: the player; grenades: inflictor's owner).
-- Buy stations without touching the BSP: `core.as` spawns `item_generic` crates
-  (`models/mil_crate.mdl`) + an `env_sprite` glow at 3 spread-out `info_player_start`s in
+- Buy stations without touching the BSP: `core.as` spawns `monster_generic` NPCs (disableai 1, takedamage 0, idle1 via LookupSequence)
+  (`models/hgrunt_opfor.mdl`) + an `env_sprite` glow at 3 spread-out `info_player_start`s in
   `MapActivate`, and a `Hooks::Player::PlayerUse` hook (`m_afButtonPressed & IN_USE`, set
   `uiFlags |= PlrHook_SkipUse`) opens the menu when the player is within 128 units of a crate.
 - Servers cannot push key binds (`cl_filterstuffcmd 1` is the client default): binds go in the

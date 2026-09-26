@@ -46,7 +46,7 @@ wad copied over and its CS-only entities swapped out.
 - monster count scales with player count; clearing a wave heals everyone and gives a 20 s break
 - monsters that never find a player are pushed onto the nearest one; a wave that drags on is force-cleared
 - Counter-Strike economy: knife + USP + $800 at start, $300 per kill, a bonus per cleared wave
-- buy at the weapon crates in spawn: walk up and press E (no binds needed); one pistol + one primary (buying into a taken slot drops the old gun)
+- buy from the Arms Dealer NPCs in spawn: walk up and press E (no binds needed); one pistol + one primary (buying into a taken slot drops the old gun)
 - `bind b ".buy"`, `bind , ".buyammo1"` (primary ammo), `bind . ".buyammo2"` (pistol ammo); or say `buy` in chat
 - guns and prices are CS 1.6's (AK-47 $2500, M4A1 $3100, AWP $4750, AUG $3500, ...) via KernCore's weapon pack
 

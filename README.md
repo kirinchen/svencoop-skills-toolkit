@@ -43,8 +43,11 @@ wad copied over and its CS-only entities swapped out.
 
 - players spawn on the CT side; monsters come from the T spawns, later waves also from the bomb sites
 - 10 themed waves (headcrabs → zombies → vortigaunts → soldiers → baby gargantua boss → … → gargantua)
-- monster count scales with player count; clearing a wave heals everyone and gives a 20 s break
-- monsters that never find a player are pushed onto the nearest one; a wave that drags on is force-cleared
+- every wave lasts 90 s. Clear it early, then press E on the Next Wave console: the sooner, the bigger the speed bonus (up to $1500 each)
+- not cleared in 90 s: the leftovers are removed and the next wave gets up to +25% HP and damage (by the uncleared fraction)
+- team lives: 20 deaths in total = defeat; dying also loses your guns
+- monster count scales with player count; clearing a wave heals everyone and pays a bonus
+- monsters that never find a player are pushed onto the nearest one
 - Counter-Strike economy: knife + USP + $800 at start, $300 per kill, a bonus per cleared wave
 - buy from the Arms Dealer NPCs in spawn: walk up and press E (no binds needed); one pistol + one primary (buying into a taken slot drops the old gun)
 - `bind b ".buy"`, `bind , ".buyammo1"` (primary ammo), `bind . ".buyammo2"` (pistol ammo); or say `buy` in chat

@@ -56,6 +56,10 @@
   (`models/hgrunt_opfor.mdl`) + an `env_sprite` glow at 3 spread-out `info_player_start`s in
   `MapActivate`, and a `Hooks::Player::PlayerUse` hook (`m_afButtonPressed & IN_USE`, set
   `uiFlags |= PlrHook_SkipUse`) opens the menu when the player is within 128 units of a crate.
+- `Hooks::Player::PlayerTakeDamage(DamageInfo@)` works for scaling monster damage
+  (`info.pAttacker.IsMonster()`, `info.flDamage *= mult`). `Hooks::Player::PlayerKilled(CBasePlayer@,
+  CBaseEntity@, int)` + `RemoveAllItems(false, false)` + removing nearby `weaponbox` = no guns on death.
+- `pev.netname` is `string_t`: wrap in `string(...)` before concatenating.
 - Servers cannot push key binds (`cl_filterstuffcmd 1` is the client default): binds go in the
   client's autoexec.cfg / MOTD.
 

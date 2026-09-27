@@ -2,13 +2,17 @@ cs_bloodstrike PVE - Monster Survival (CS economy)
 
 Hold the map together against 10 waves of monsters.
 Monsters come from the T-side of this small arena.
-Clear a wave to get healed, a cash bonus and a short break.
+Every wave lasts 90 seconds. Clear it, then press E on the Next Wave console:
+the sooner you press, the bigger the speed bonus for everyone.
+Not cleared in time? Leftovers vanish and the next wave gets up to +25% HP/damage.
+20 team deaths in total = defeat. Dying loses your guns.
 Wave 5 and wave 10 are boss waves.
 
 BUYING (Counter-Strike rules)
 - You start with a knife, a USP and $800. Kills pay $300, wave clears pay a bonus.
 - Walk up to the Arms Dealer in spawn and press E to buy (the HUD shows [BUY ZONE]).
 - One pistol + one primary. Buying into a taken slot drops the old gun.
+- Kills pay $300, each cleared wave pays a bonus, fast console presses pay more.
 
 Optional binds (E on a crate already works):
   bind b ".buy"

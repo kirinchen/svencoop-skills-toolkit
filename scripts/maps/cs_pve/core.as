@@ -28,18 +28,23 @@ const int   MAX_MONEY        = 16000;
 const int   KEVLAR_PRICE     = 650;
 const float BUYZONE_PAD      = 320.0f;  // fallback buy zone (no stations): box around the CT spawns + padding
 
-// buy stations: arms-dealer NPCs standing at the CT spawn; press E next to one to open the buy menu
+// two NPC "stations" at the CT spawn (spawned by the script, no BSP change):
+//   Arms Dealer  - press E to open the buy menu
+//   Next Wave console - after a wave is cleared, press E to start the next wave early (speed bonus)
 const string STATION_MODEL   = "models/hgrunt_opfor.mdl";
 const string STATION_NAME    = "Arms Dealer";
+const string DEVICE_MODEL    = "models/nuke_button.mdl";
+const string DEVICE_NAME     = "Next Wave Console";
 const string STATION_SPRITE  = "sprites/flare1.spr";
-const int    STATION_COUNT   = 3;
-const float  STATION_USE_DIST = 128.0f; // E works within this distance of a crate
-const float  STATION_BUY_DIST = 256.0f; // the buy zone around each crate (for B / chat buy)
+const float  STATION_USE_DIST = 128.0f; // E works within this distance of the NPC / console
+const float  STATION_BUY_DIST = 256.0f; // the buy zone around the dealer (for B / chat buy)
 
 const float THINK_INTERVAL   = 1.0f;
 const float START_COUNTDOWN  = 30.0f;   // seconds after the first player spawns
-const float WAVE_BREAK       = 25.0f;   // seconds between waves
-const float WAVE_TIMEOUT     = 420.0f;  // force-clear a wave after this long
+const float WAVE_TIME        = 90.0f;   // every wave lasts this long; the next one starts when it runs out
+const int   SPEED_BONUS_MAX  = 1500;    // pressing the console right after a clear pays this much, shrinking to 0 at 90 s
+const float PENALTY_MAX      = 0.25f;   // uncleared wave -> next wave gets up to +25% HP and damage (by uncleared fraction)
+const int   MAX_TEAM_DEATHS  = 20;      // total deaths of the whole team; one more = defeat
 const int   MAX_ALIVE        = 22;      // concurrent monsters cap
 const int   SPAWN_PER_TICK   = 3;
 const float SPAWN_MIN_DIST   = 450.0f;  // never spawn this close to a player
@@ -50,9 +55,10 @@ enum PveState
 {
     PVE_WAITING,
     PVE_COUNTDOWN,
-    PVE_WAVE,
-    PVE_BREAK,
-    PVE_VICTORY
+    PVE_WAVE,       // monsters alive, timer running
+    PVE_CLEARED,    // wave cleared, timer still running; E on the console starts the next wave now
+    PVE_VICTORY,
+    PVE_DEFEAT
 }
 
 enum GunSlot
@@ -97,7 +103,9 @@ array<WaveDef@> g_Waves;
 array<Gun@>     g_Guns;
 array<Vector>   g_MainSpawns;
 array<Vector>   g_FlankSpawns;
-array<Vector>   g_Stations;
+array<Vector>   g_Stations;      // arms dealer position(s)
+Vector          g_DevicePos;
+bool            g_HasDevice = false;
 Vector          g_BuyMins, g_BuyMaxs;
 dictionary      g_LastUse;   // steamid -> float, E-key debounce
 
@@ -105,6 +113,10 @@ PveState g_State = PVE_WAITING;
 float    g_Timer = 0.0f;
 int      g_WaveIdx = -1;
 float    g_WaveStart = 0.0f;
+float    g_Penalty = 0.0f;   // set when a wave times out; applied to the next wave, then reset
+float    g_DmgMult = 1.0f;   // monster damage multiplier for the current wave
+float    g_WaveHpMult = 1.0f;
+int      g_Deaths = 0;       // team deaths so far
 array<string>  g_Queue;
 array<EHandle> g_Alive;
 array<int>     g_IdleSecs;
@@ -315,12 +327,15 @@ bool CanBuy( CBasePlayer@ p )
     return true;
 }
 
-// E on a weapon crate opens the buy menu
+// E on the Arms Dealer opens the buy menu; E on the console starts the next wave (when cleared)
 HookReturnCode OnPlayerUse( CBasePlayer@ pPlayer, uint& out uiFlags )
 {
     if( pPlayer is null || ( pPlayer.m_afButtonPressed & IN_USE ) == 0 ) return HOOK_CONTINUE;
-    if( g_Stations.length() == 0 || !pPlayer.IsAlive() ) return HOOK_CONTINUE;
-    if( NearestStationDist( pPlayer.pev.origin ) > STATION_USE_DIST ) return HOOK_CONTINUE;
+    if( !pPlayer.IsAlive() ) return HOOK_CONTINUE;
+
+    bool nearDevice = g_HasDevice && ( g_DevicePos - pPlayer.pev.origin ).Length() <= STATION_USE_DIST;
+    bool nearDealer = g_Stations.length() > 0 && NearestStationDist( pPlayer.pev.origin ) <= STATION_USE_DIST;
+    if( !nearDevice && !nearDealer ) return HOOK_CONTINUE;
 
     string id = PlayerKey( pPlayer );
     float last = g_LastUse.exists( id ) ? float( g_LastUse[id] ) : -10.0f;
@@ -328,7 +343,62 @@ HookReturnCode OnPlayerUse( CBasePlayer@ pPlayer, uint& out uiFlags )
     g_LastUse[id] = g_Engine.time;
 
     uiFlags |= PlrHook_SkipUse;
-    OpenBuyMenu( pPlayer );
+    if( nearDevice )
+        UseDevice( pPlayer );
+    else
+        OpenBuyMenu( pPlayer );
+    return HOOK_CONTINUE;
+}
+
+void UseDevice( CBasePlayer@ p )
+{
+    if( g_State == PVE_CLEARED )
+    {
+        int bonus = int( float( SPEED_BONUS_MAX ) * g_Timer / WAVE_TIME );
+        if( bonus < 0 ) bonus = 0;
+        AddMoneyAll( bonus );
+        Big( string( p.pev.netname ) + " started the next wave early: +$" + bonus + " speed bonus for everyone!" );
+        StartWave( g_WaveIdx + 1 );
+    }
+    else if( g_State == PVE_WAVE )
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Clear the wave first!" );
+    else if( g_State == PVE_COUNTDOWN )
+    {
+        Big( string( p.pev.netname ) + " skipped the countdown. Here they come!" );
+        StartWave( 0 );
+    }
+}
+
+// monsters hit harder after an uncleared wave (see PENALTY_MAX)
+HookReturnCode OnPlayerTakeDamage( DamageInfo@ info )
+{
+    if( g_DmgMult != 1.0f && info !is null && info.pAttacker !is null
+        && info.pAttacker.IsMonster() && !info.pAttacker.IsPlayer() )
+        info.flDamage = info.flDamage * g_DmgMult;
+    return HOOK_CONTINUE;
+}
+
+// death = your guns are gone (nothing to pick back up)
+HookReturnCode OnPlayerKilled( CBasePlayer@ pPlayer, CBaseEntity@ pAttacker, int iGib )
+{
+    if( pPlayer is null ) return HOOK_CONTINUE;
+    pPlayer.RemoveAllItems( false, false );
+    if( g_State == PVE_WAVE || g_State == PVE_CLEARED || g_State == PVE_COUNTDOWN )
+    {
+        ++g_Deaths;
+        int left = MAX_TEAM_DEATHS - g_Deaths;
+        if( left > 0 )
+            g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[PVE] " + string( pPlayer.pev.netname ) + " died. Team lives left: " + left + "
+" );
+        else
+            Defeat();
+    }
+    CBaseEntity@ e = null;
+    while( ( @e = g_EntityFuncs.FindEntityByClassname( e, "weaponbox" ) ) !is null )
+    {
+        if( ( e.pev.origin - pPlayer.pev.origin ).Length() <= 128.0f )
+            g_EntityFuncs.Remove( e );
+    }
     return HOOK_CONTINUE;
 }
 
@@ -339,7 +409,48 @@ Vector FloorAt( const Vector& in p )
     return tr.flFraction < 1.0f ? tr.vecEndPos : p;
 }
 
-// place STATION_COUNT crates on spawn points spread as far apart as possible
+// a non-AI display NPC (monster_generic): never moves, never fights, cannot die
+CBaseEntity@ SpawnProp( const Vector& in pos, float yaw, const string& in model, const string& in name, const string& in targetname )
+{
+    dictionary kv;
+    kv["origin"] = string( pos.x ) + " " + string( pos.y ) + " " + string( pos.z + 8.0f );
+    kv["angles"] = "0 " + string( yaw ) + " 0";
+    kv["model"] = model;
+    kv["displayname"] = name;
+    kv["targetname"] = targetname;
+    kv["disableai"] = "1";
+    CBaseEntity@ npc = g_EntityFuncs.CreateEntity( "monster_generic", kv, true );
+    if( npc is null ) return null;
+    npc.pev.takedamage = DAMAGE_NO;
+    npc.pev.health = 1000000;
+    CBaseAnimating@ anim = cast<CBaseAnimating@>( npc );
+    if( anim !is null )
+    {
+        int seq = anim.LookupSequence( "idle1" );
+        if( seq >= 0 )
+        {
+            npc.pev.sequence = seq;
+            npc.pev.frame = 0;
+            anim.ResetSequenceInfo();
+        }
+    }
+    return npc;
+}
+
+void SpawnGlow( const Vector& in pos, const string& in color )
+{
+    dictionary sp;
+    sp["origin"] = string( pos.x ) + " " + string( pos.y ) + " " + string( pos.z );
+    sp["model"] = STATION_SPRITE;
+    sp["rendermode"] = "5";
+    sp["renderamt"] = "180";
+    sp["rendercolor"] = color;
+    sp["scale"] = "0.25";
+    sp["spawnflags"] = "1";
+    g_EntityFuncs.CreateEntity( "env_sprite", sp, true );
+}
+
+// Arms Dealer on the spawn point nearest the centre, Next Wave console on the one farthest from him
 void SpawnBuyStations( const array<Vector>& in spawns, const array<float>& in yaws )
 {
     if( spawns.length() == 0 ) return;
@@ -347,77 +458,41 @@ void SpawnBuyStations( const array<Vector>& in spawns, const array<float>& in ya
     for( uint i = 0; i < spawns.length(); ++i ) c = c + spawns[i];
     c = c * ( 1.0f / float( spawns.length() ) );
 
-    array<int> chosen;
-    int firstIdx = 0; float bd = 999999.0f;
+    int dealerIdx = 0; float bd = 999999.0f;
     for( uint i = 0; i < spawns.length(); ++i )
     {
         float d = ( spawns[i] - c ).Length();
-        if( d < bd ) { bd = d; firstIdx = int( i ); }
+        if( d < bd ) { bd = d; dealerIdx = int( i ); }
     }
-    chosen.insertLast( firstIdx );
-    while( int( chosen.length() ) < STATION_COUNT && chosen.length() < spawns.length() )
+    int deviceIdx = -1; float far = -1.0f;
+    for( uint i = 0; i < spawns.length(); ++i )
     {
-        int bestI = -1; float bestD = -1.0f;
-        for( uint i = 0; i < spawns.length(); ++i )
-        {
-            if( chosen.find( int( i ) ) >= 0 ) continue;
-            float dmin = 999999.0f;
-            for( uint k = 0; k < chosen.length(); ++k )
-            {
-                float d = ( spawns[i] - spawns[chosen[k]] ).Length();
-                if( d < dmin ) dmin = d;
-            }
-            if( dmin > bestD ) { bestD = dmin; bestI = int( i ); }
-        }
-        if( bestI < 0 ) break;
-        chosen.insertLast( bestI );
+        if( int( i ) == dealerIdx ) continue;
+        float d = ( spawns[i] - spawns[dealerIdx] ).Length();
+        if( d > far ) { far = d; deviceIdx = int( i ); }
     }
 
-    for( uint k = 0; k < chosen.length(); ++k )
+    // 72 units in front of the spawn point so nobody spawns inside the prop; prop faces the spawn
+    float yaw = yaws[dealerIdx] * 0.0174533f;
+    Vector pos = FloorAt( spawns[dealerIdx] + Vector( cos( yaw ), sin( yaw ), 0 ) * 72.0f );
+    if( SpawnProp( pos, yaws[dealerIdx] + 180.0f, STATION_MODEL, STATION_NAME, "pve_buystation" ) !is null )
     {
-        int i = chosen[k];
-        // 72 units in front of the spawn point so nobody spawns inside the crate
-        float yaw = yaws[i] * 0.0174533f;
-        Vector fwd( cos( yaw ), sin( yaw ), 0 );
-        Vector pos = FloorAt( spawns[i] + fwd * 72.0f );
-
-        // a non-AI display NPC (monster_generic): never moves, never fights, cannot die
-        dictionary kv;
-        kv["origin"] = string( pos.x ) + " " + string( pos.y ) + " " + string( pos.z + 37.0f );
-        kv["angles"] = "0 " + string( yaws[i] + 180.0f ) + " 0";   // faces the spawn point
-        kv["model"] = STATION_MODEL;
-        kv["displayname"] = STATION_NAME;
-        kv["targetname"] = "pve_buystation";
-        kv["disableai"] = "1";
-        CBaseEntity@ npc = g_EntityFuncs.CreateEntity( "monster_generic", kv, true );
-        if( npc is null ) continue;
-        npc.pev.takedamage = DAMAGE_NO;
-        npc.pev.health = 1000000;
-        CBaseAnimating@ anim = cast<CBaseAnimating@>( npc );
-        if( anim !is null )
-        {
-            int seq = anim.LookupSequence( "idle1" );
-            if( seq >= 0 )
-            {
-                npc.pev.sequence = seq;
-                npc.pev.frame = 0;
-                anim.ResetSequenceInfo();
-            }
-        }
         g_Stations.insertLast( pos );
-
-        dictionary sp;
-        Vector sPos = pos + Vector( 0, 0, 96 );
-        sp["origin"] = string( sPos.x ) + " " + string( sPos.y ) + " " + string( sPos.z );
-        sp["model"] = STATION_SPRITE;
-        sp["rendermode"] = "5";
-        sp["renderamt"] = "180";
-        sp["rendercolor"] = "255 200 60";
-        sp["scale"] = "0.25";
-        sp["spawnflags"] = "1";
-        g_EntityFuncs.CreateEntity( "env_sprite", sp, true );
+        SpawnGlow( pos + Vector( 0, 0, 96 ), "255 200 60" );
     }
-    g_Game.AlertMessage( at_console, "[cs_pve] buy stations: %1\n", g_Stations.length() );
+
+    if( deviceIdx >= 0 )
+    {
+        yaw = yaws[deviceIdx] * 0.0174533f;
+        pos = FloorAt( spawns[deviceIdx] + Vector( cos( yaw ), sin( yaw ), 0 ) * 72.0f );
+        if( SpawnProp( pos, yaws[deviceIdx] + 180.0f, DEVICE_MODEL, DEVICE_NAME, "pve_device" ) !is null )
+        {
+            g_DevicePos = pos;
+            g_HasDevice = true;
+            SpawnGlow( pos + Vector( 0, 0, 72 ), "80 200 255" );
+        }
+    }
+    g_Game.AlertMessage( at_console, "[cs_pve] buy stations: %1, device: %2\n", g_Stations.length(), g_HasDevice ? 1 : 0 );
 }
 
 void OpenBuyMenu( CBasePlayer@ p )
@@ -599,11 +674,14 @@ void PveMapInit()
     g_HudMoney.fadeinTime = 0.0; g_HudMoney.fadeoutTime = 0.2; g_HudMoney.holdTime = 1.2; g_HudMoney.fxTime = 0.0;
 
     g_Game.PrecacheModel( STATION_MODEL );
+    g_Game.PrecacheModel( DEVICE_MODEL );
     g_Game.PrecacheModel( STATION_SPRITE );
 
     g_Hooks.RegisterHook( Hooks::Player::PlayerSpawn, @OnPlayerSpawn );
     g_Hooks.RegisterHook( Hooks::Player::ClientSay, @OnClientSay );
     g_Hooks.RegisterHook( Hooks::Player::PlayerUse, @OnPlayerUse );
+    g_Hooks.RegisterHook( Hooks::Player::PlayerTakeDamage, @OnPlayerTakeDamage );
+    g_Hooks.RegisterHook( Hooks::Player::PlayerKilled, @OnPlayerKilled );
     g_Scheduler.SetInterval( "PveThink", THINK_INTERVAL, g_Scheduler.REPEAT_INFINITE_TIMES );
 }
 
@@ -655,7 +733,7 @@ HookReturnCode OnPlayerSpawn( CBasePlayer@ pPlayer )
             g_GotStartMoney[id] = true;
             AddMoney( pPlayer, START_MONEY );
         }
-        g_PlayerFuncs.ClientPrint( pPlayer, HUD_PRINTTALK, "[PVE] $" + GetMoney( pPlayer ) + ". Buy at spawn: B (bind b .buy) or say buy. Ammo: , and . (buyammo1/2)\n" );
+        g_PlayerFuncs.ClientPrint( pPlayer, HUD_PRINTTALK, "[PVE] $" + GetMoney( pPlayer ) + ". E on the Arms Dealer to buy. E on the console after a clear = next wave + speed bonus.\n" );
     }
     return HOOK_CONTINUE;
 }
@@ -758,7 +836,7 @@ void PlayerHud()
     {
         CBasePlayer@ p = g_PlayerFuncs.FindPlayerByIndex( i );
         if( p is null || !p.IsConnected() ) continue;
-        string line = "$" + GetMoney( p );
+        string line = "$" + GetMoney( p ) + "   lives " + ( MAX_TEAM_DEATHS - g_Deaths ) + "/" + MAX_TEAM_DEATHS;
         if( p.IsAlive() && InBuyZone( p ) ) line += ( g_Stations.length() > 0 ) ? "   [BUY ZONE]  E on dealer / B" : "   [BUY ZONE]  B / buy";
         g_PlayerFuncs.HudMessage( p, g_HudMoney, line );
         if( p.IsAlive() ) EnforceSlots( p );
@@ -767,6 +845,14 @@ void PlayerHud()
 
 // ------------------------------------------------------------------ waves
 
+string Clock( float secs )
+{
+    int s = int( secs + 0.5f );
+    if( s < 0 ) s = 0;
+    int m = s / 60; s = s % 60;
+    return ( m < 10 ? "0" : "" ) + m + ":" + ( s < 10 ? "0" : "" ) + s;
+}
+
 void StartWave( int idx )
 {
     g_WaveIdx = idx;
@@ -774,6 +860,13 @@ void StartWave( int idx )
     int players = CountPlayers( false );
     if( players < 1 ) players = 1;
     float scale = 1.0f + 0.35f * float( players - 1 );
+
+    // penalty from the previous (uncleared) wave: more HP and damage this wave, then it is gone
+    g_DmgMult = 1.0f + g_Penalty;
+    float hpMult = w.healthMult * ( 1.0f + g_Penalty );
+    string penaltyTxt = g_Penalty > 0.0f ? "  [+" + int( g_Penalty * 100.0f + 0.5f ) + "% HP/DMG]" : "";
+    g_Penalty = 0.0f;
+    g_WaveHpMult = hpMult;
 
     g_Queue.resize( 0 );
     g_Alive.resize( 0 );
@@ -791,9 +884,11 @@ void StartWave( int idx )
     }
     g_WaveTotal = int( g_Queue.length() );
     g_WaveStart = g_Engine.time;
+    g_Timer = WAVE_TIME;
     g_State = PVE_WAVE;
-    Big( w.title + "  (" + g_WaveTotal + " monsters)" );
+    Big( w.title + "  (" + g_WaveTotal + " monsters)" + penaltyTxt );
 }
+
 
 void SpawnOne( const string& in cls, float healthMult, bool allowFlank )
 {
@@ -902,20 +997,47 @@ void WaveCleared()
     HealAll();
     int bonus = WAVE_BONUS_BASE + WAVE_BONUS_PER * ( g_WaveIdx + 1 );
     AddMoneyAll( bonus );
-    g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[PVE] Wave bonus: $" + bonus + " to everyone. Go back to spawn to buy.\n" );
+    g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[PVE] Wave bonus: $" + bonus + " to everyone.\n" );
     bool last = ( g_WaveIdx + 1 >= int( g_Waves.length() ) );
     if( last )
     {
         g_State = PVE_VICTORY;
         g_Timer = VICTORY_RESTART;
-        Big( "VICTORY! de_dust2 is clear. Restarting in " + int( VICTORY_RESTART ) + "s" );
+        Big( "VICTORY! The map is clear. Restarting in " + int( VICTORY_RESTART ) + "s" );
     }
     else
     {
-        g_State = PVE_BREAK;
-        g_Timer = WAVE_BREAK;
-        Big( "Wave cleared! Everyone healed. Next wave in " + int( WAVE_BREAK ) + "s" );
+        g_State = PVE_CLEARED;   // g_Timer keeps running down; the console starts the next wave early
+        Big( "Wave cleared! Buy, then press E on the console: the sooner, the bigger the bonus (up to $" + SPEED_BONUS_MAX + ")" );
     }
+}
+
+void Defeat()
+{
+    if( g_State == PVE_DEFEAT ) return;
+    ClearRemaining();
+    g_State = PVE_DEFEAT;
+    g_Timer = VICTORY_RESTART;
+    Big( "DEFEAT - the team died " + MAX_TEAM_DEATHS + " times. Restarting in " + int( VICTORY_RESTART ) + "s" );
+}
+
+// the 90 s ran out with monsters still alive
+void WaveTimedOut( int remaining )
+{
+    float frac = g_WaveTotal > 0 ? float( remaining ) / float( g_WaveTotal ) : 0.0f;
+    if( frac > 1.0f ) frac = 1.0f;
+    g_Penalty = PENALTY_MAX * frac;
+    ClearRemaining();
+    Big( "Time's up! " + remaining + "/" + g_WaveTotal + " left -> next wave gets +" + int( g_Penalty * 100.0f + 0.5f ) + "% HP and damage" );
+    bool last = ( g_WaveIdx + 1 >= int( g_Waves.length() ) );
+    if( last )
+    {
+        g_State = PVE_VICTORY;
+        g_Timer = VICTORY_RESTART;
+        Big( "Final wave over. Restarting in " + int( VICTORY_RESTART ) + "s" );
+        return;
+    }
+    StartWave( g_WaveIdx + 1 );
 }
 
 void RestartMap()
@@ -943,17 +1065,28 @@ void PveThink()
     if( g_State == PVE_WAITING )
         return;
 
-    if( g_State == PVE_COUNTDOWN || g_State == PVE_BREAK )
+    if( g_State == PVE_COUNTDOWN )
     {
         g_Timer -= THINK_INTERVAL;
-        string lead = ( g_State == PVE_COUNTDOWN ) ? "Get ready - first wave in " : "Next wave in ";
-        g_PlayerFuncs.HudMessageAll( g_HudStatus, lead + int( g_Timer + 0.5f ) + "s" );
+        g_PlayerFuncs.HudMessageAll( g_HudStatus, "Get ready - first wave in " + int( g_Timer + 0.5f ) + "s  (E on the console to start now)" );
+        if( g_Timer <= 0.0f )
+            StartWave( 0 );
+        return;
+    }
+
+    if( g_State == PVE_CLEARED )
+    {
+        g_Timer -= THINK_INTERVAL;
+        int bonus = int( float( SPEED_BONUS_MAX ) * g_Timer / WAVE_TIME );
+        if( bonus < 0 ) bonus = 0;
+        g_PlayerFuncs.HudMessageAll( g_HudStatus,
+            "WAVE CLEARED   next wave in " + Clock( g_Timer ) + "\nPress E on the console now: +$" + bonus + " for everyone" );
         if( g_Timer <= 0.0f )
             StartWave( g_WaveIdx + 1 );
         return;
     }
 
-    if( g_State == PVE_VICTORY )
+    if( g_State == PVE_VICTORY || g_State == PVE_DEFEAT )
     {
         g_Timer -= THINK_INTERVAL;
         if( g_Timer <= 0.0f )
@@ -964,7 +1097,9 @@ void PveThink()
         return;
     }
 
+    // PVE_WAVE
     WaveDef@ w = g_Waves[g_WaveIdx];
+    g_Timer -= THINK_INTERVAL;
     int alive = PruneAndCountAlive();
 
     int spawned = 0;
@@ -972,7 +1107,7 @@ void PveThink()
     {
         string cls = g_Queue[ g_Queue.length() - 1 ];
         g_Queue.removeLast();
-        SpawnOne( cls, w.healthMult, w.flank );
+        SpawnOne( cls, g_WaveHpMult, w.flank );
         ++alive; ++spawned;
     }
 
@@ -980,17 +1115,13 @@ void PveThink()
 
     int remaining = alive + int( g_Queue.length() );
     g_PlayerFuncs.HudMessageAll( g_HudStatus,
-        w.title + "\nMonsters left: " + remaining + " / " + g_WaveTotal );
+        w.title + "   " + Clock( g_Timer ) + "\nMonsters left: " + remaining + " / " + g_WaveTotal );
 
     if( remaining <= 0 )
     {
         WaveCleared();
         return;
     }
-    if( g_Engine.time - g_WaveStart > WAVE_TIMEOUT )
-    {
-        ClearRemaining();
-        g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[PVE] Wave timed out - remaining monsters removed.\n" );
-        WaveCleared();
-    }
+    if( g_Timer <= 0.0f )
+        WaveTimedOut( remaining );
 }

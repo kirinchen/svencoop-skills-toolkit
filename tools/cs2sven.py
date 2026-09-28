@@ -178,6 +178,21 @@ if os.path.isdir(shared):
     shutil.copytree(shared, scripts_dir, dirs_exist_ok=True)
     print('copied shared scripts from', shared)
 
+# sky textures (gfx/env/<skyname>{bk,dn,ft,lf,rt,up}.tga) if Sven does not have them
+skyname = next((bspents.kv(b).get('skyname') for b in bspents.blocks(ents) if '"worldspawn"' in b), None)
+if skyname:
+    for side in ('bk', 'dn', 'ft', 'lf', 'rt', 'up'):
+        fn = os.path.join('gfx', 'env', '%s%s.tga' % (skyname, side))
+        if any(os.path.exists(os.path.join(sd, fn)) for sd in SVEN_SEARCH):
+            continue
+        src = next((os.path.join(sd, fn) for sd in HL_SEARCH if os.path.exists(os.path.join(sd, fn))), None)
+        if src is None:
+            print('WARNING: sky texture not found:', fn)
+            continue
+        os.makedirs(os.path.join(ADDON, 'gfx', 'env'), exist_ok=True)
+        shutil.copy(src, os.path.join(ADDON, fn))
+        print('copied sky', fn)
+
 # per-map assets
 if a.assets:
     for fn, dst in ((NAME + '.cfg', maps_dir), (NAME + '.res', maps_dir),

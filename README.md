@@ -15,6 +15,7 @@ Sven Co-op with friends.
 | `scripts/maps/cs_pve/core.as` | the shared game logic: waves, monster AI nudging, CS economy and buy menu; every map script includes it |
 | `maps/dust2_pve/` | de_dust2 PVE: wave table (`.as`), `.cfg`, `.res`, motd |
 | `maps/bloodstrike_pve/` | cs_bloodstrike PVE: small arena, lighter waves |
+| `maps/csgodust2_pve/` | gg_csgodust2_mini PVE: CS:GO-style dust2, compact; custom sky copied by the build |
 | `.claude/skills/cs-map-to-sven-pve/` | Claude Code skill: the whole port workflow, including the headless validation run |
 | `docs/notes.md` | Sven Co-op facts and pitfalls learned the hard way (map_script location, node graph, `svends.exe` + SDL3.dll, AngelScript API) |
 
@@ -29,7 +30,7 @@ python tools/install_cs16_weapons.py
 python tools/cs2sven.py "C:/Program Files (x86)/Steam/steamapps/common/Half-Life/cstrike/maps/de_dust2.bsp" dust2_pve --assets maps/dust2_pve --res-extra "C:/Program Files (x86)/Steam/steamapps/common/Sven Co-op/svencoop_addon/cs16_resources.res"
 ```
 
-Then in Sven Co-op: `map dust2_pve` (or `map bloodstrike_pve`). The first load builds the node graph (a few minutes for
+Then in Sven Co-op: `map dust2_pve` (or `map bloodstrike_pve`, `map csgodust2_pve`). The first load builds the node graph (a few minutes for
 ~700 nodes); it is cached in `svencoop/maps/graphs/`.
 
 ## Why Sven Co-op and not CS 1.6

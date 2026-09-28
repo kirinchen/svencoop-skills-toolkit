@@ -8,6 +8,9 @@
   Sven does NOT ship `cs_dust.wad`; copy it from `Half-Life/cstrike/`.
 - Custom content goes in `svencoop_addon/` (maps/, scripts/maps/, wads at the root).
 
+- Custom skies: `worldspawn` `skyname` needs `gfx/env/<sky>{bk,dn,ft,lf,rt,up}.tga`; cs2sven.py copies
+  them from the Half-Life dirs into `svencoop_addon` and they must be listed in the map `.res`.
+
 ## Map script
 - The map script is declared in the map's **`.cfg`**: `map_script NAME` → `scripts/maps/NAME.as`.
   A `map_script` key on worldspawn does nothing (the FGD has no such key).

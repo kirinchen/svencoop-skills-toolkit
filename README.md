@@ -58,7 +58,7 @@ wad copied over and its CS-only entities swapped out.
 - Counter-Strike economy: knife + USP + $800 at start, $300 per kill, a bonus per cleared wave
 - buy from the Arms Dealer NPC in spawn: walk up and press E (no binds needed)
 - one gun per category: [2] pistol or shotgun, [3] SMG, [4] rifle/sniper, [5] machine gun (buying into a taken category drops the old gun; picking up a second one drops it too)
-- buying a gun you already own upgrades it (same price): +2 spare mags of reserve, then magazine +20%, alternating, 2 levels each
+- buying a gun you already own upgrades it (same price): +2 spare mags of reserve, then magazine +20%, alternating, 5 levels each
 - `bind b ".buy"`, `bind , ".buyammo1"` (primary ammo), `bind . ".buyammo2"` (pistol ammo); or say `buy` in chat
 - guns and prices are CS 1.6's (AK-47 $2500, M4A1 $3100, AWP $4750, AUG $3500, ...) via KernCore's weapon pack; ammo and Kevlar cost 4x CS
 - ammo is bought per magazine from the Ammo menu (pick the category): price = rounds in the magazine x per-round price of that ammo type (CS magazine price x4 / rounds); an upgraded, bigger magazine costs proportionally more

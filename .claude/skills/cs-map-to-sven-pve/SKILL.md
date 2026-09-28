@@ -39,7 +39,8 @@ repo (or `--tools PATH`). Read `docs/notes.md` first if anything Sven-specific i
    python tools/cs2sven.py MAP.bsp NAME --assets maps/NAME --dry-run   # check counts first
    python tools/cs2sven.py MAP.bsp NAME --assets maps/NAME
    ```
-   Keep `info_nodes` under ~1000; raise `--spacing` if needed. Output lands in
+   `--player-side t` makes the T spawns the player side (hostage maps: T side is the defensible
+   building). Keep `info_nodes` under ~1000; raise `--spacing` if needed. Output lands in
    `Sven Co-op/svencoop_addon/`.
 
 6. **Validate headless** (no need to open the game). Steam must be running.

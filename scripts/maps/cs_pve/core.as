@@ -52,6 +52,12 @@ const float WAVE_TIME        = 180.0f;  // every wave lasts this long (3 min); t
 const int   SPEED_BONUS_MAX  = 1500;    // pressing the console right after a clear pays this much, shrinking to 0 at the end of the wave timer
 const float PENALTY_MAX      = 0.25f;   // uncleared wave -> next wave gets up to +25% HP and damage (by uncleared fraction)
 const int   MAX_TEAM_DEATHS  = 20;      // total deaths of the whole team; one more = defeat
+
+// hostages (cs_ maps): spawned on the map's hostage spots; monsters hunt them; all dead = defeat
+const string HOSTAGE_CLASS   = "monster_scientist";
+const string HOSTAGE_NAME    = "Hostage";
+const int    HOSTAGE_HP      = 400;
+const int    HOSTAGE_TARGET_PCT = 35;   // % of spawned monsters that go for a hostage instead of a player
 const int   MAX_ALIVE        = 40;      // concurrent monsters cap
 const int   SPAWN_PER_TICK   = 4;
 const float SPAWN_POINT_COOLDOWN = 3.0f; // a spawn point is reused only after this many seconds
@@ -117,6 +123,8 @@ array<Vector>   g_FlankSpawns;
 array<float>    g_MainLast;      // last spawn time per point
 array<float>    g_FlankLast;
 array<Vector>   g_Stations;      // arms dealer position(s)
+array<EHandle>  g_Hostages;
+int             g_HostageTotal = 0;
 Vector          g_DevicePos;
 bool            g_HasDevice = false;
 Vector          g_BuyMins, g_BuyMaxs;
@@ -406,7 +414,10 @@ HookReturnCode OnPlayerKilled( CBasePlayer@ pPlayer, CBaseEntity@ pAttacker, int
             g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[PVE] " + string( pPlayer.pev.netname ) + " died. Team lives left: " + left + "
 " );
         else
+        {
+            Big( "The team died " + MAX_TEAM_DEATHS + " times!" );
             Defeat();
+        }
     }
     CBaseEntity@ e = null;
     while( ( @e = g_EntityFuncs.FindEntityByClassname( e, "weaponbox" ) ) !is null )
@@ -784,6 +795,7 @@ void PveMapInit()
     g_HudMoney.r1 = 120; g_HudMoney.g1 = 255; g_HudMoney.b1 = 120; g_HudMoney.a1 = 255;
     g_HudMoney.fadeinTime = 0.0; g_HudMoney.fadeoutTime = 0.2; g_HudMoney.holdTime = 1.2; g_HudMoney.fxTime = 0.0;
 
+    g_Game.PrecacheOther( HOSTAGE_CLASS );
     g_Game.PrecacheModel( STATION_MODEL );
     g_Game.PrecacheModel( DEVICE_MODEL );
     g_Game.PrecacheModel( STATION_SPRITE );
@@ -830,6 +842,25 @@ void PveMapActivate()
     g_BuyMins = g_BuyMins - Vector( BUYZONE_PAD, BUYZONE_PAD, 128 );
     g_BuyMaxs = g_BuyMaxs + Vector( BUYZONE_PAD, BUYZONE_PAD, 128 );
     SpawnBuyStations( spawns, yaws );
+
+    // hostages
+    @e = null;
+    while( ( @e = g_EntityFuncs.FindEntityByTargetname( e, "pve_hostage" ) ) !is null )
+    {
+        dictionary kv;
+        Vector o = e.pev.origin;
+        kv["origin"] = string( o.x ) + " " + string( o.y ) + " " + string( o.z );
+        kv["angles"] = "0 " + string( e.pev.angles.y ) + " 0";
+        kv["displayname"] = HOSTAGE_NAME;
+        kv["targetname"] = "pve_hostage_npc";
+        CBaseEntity@ h = g_EntityFuncs.CreateEntity( HOSTAGE_CLASS, kv, true );
+        if( h is null ) continue;
+        h.pev.health = HOSTAGE_HP;
+        h.pev.max_health = HOSTAGE_HP;
+        g_Hostages.insertLast( EHandle( h ) );
+    }
+    g_HostageTotal = int( g_Hostages.length() );
+    g_Game.AlertMessage( at_console, "[cs_pve] hostages: %1\n", g_HostageTotal );
 
     g_Game.AlertMessage( at_console, "[cs_pve] spawns: main=%1 flank=%2 waves=%3 guns=%4\n",
         g_MainSpawns.length(), g_FlankSpawns.length(), g_Waves.length(), g_Guns.length() );
@@ -952,6 +983,29 @@ Vector SpawnNearPlayer( CBasePlayer@ p )
     return best;
 }
 
+int AliveHostages()
+{
+    int n = 0;
+    for( uint i = 0; i < g_Hostages.length(); ++i )
+    {
+        CBaseEntity@ h = g_Hostages[i].GetEntity();
+        if( h !is null && h.IsAlive() ) ++n;
+    }
+    return n;
+}
+
+CBaseEntity@ RandomAliveHostage()
+{
+    array<CBaseEntity@> hs;
+    for( uint i = 0; i < g_Hostages.length(); ++i )
+    {
+        CBaseEntity@ h = g_Hostages[i].GetEntity();
+        if( h !is null && h.IsAlive() ) hs.insertLast( h );
+    }
+    if( hs.length() == 0 ) return null;
+    return hs[ Math.RandomLong( 0, hs.length() - 1 ) ];
+}
+
 void HealAll()
 {
     for( int i = 1; i <= g_Engine.maxClients; ++i )
@@ -975,6 +1029,7 @@ void PlayerHud()
         CBasePlayer@ p = g_PlayerFuncs.FindPlayerByIndex( i );
         if( p is null || !p.IsConnected() ) continue;
         string line = "$" + GetMoney( p ) + "   lives " + ( MAX_TEAM_DEATHS - g_Deaths ) + "/" + MAX_TEAM_DEATHS;
+        if( g_HostageTotal > 0 ) line += "   hostages " + AliveHostages() + "/" + g_HostageTotal;
         if( p.IsAlive() && InBuyZone( p ) ) line += ( g_Stations.length() > 0 ) ? "   [BUY ZONE]  E on dealer / B" : "   [BUY ZONE]  B / buy";
         g_PlayerFuncs.HudMessage( p, g_HudMoney, line );
         if( p.IsAlive() ) EnforceSlots( p );
@@ -1046,10 +1101,14 @@ bool SpawnOne( const string& in cls, float healthMult, bool allowFlank )
     CBaseMonster@ m = e.MyMonsterPointer();
     if( m !is null )
     {
-        CBasePlayer@ p = RandomAlivePlayer();
-        if( p !is null )
+        CBaseEntity@ target = null;
+        if( g_HostageTotal > 0 && Math.RandomLong( 0, 99 ) < HOSTAGE_TARGET_PCT )
+            @target = RandomAliveHostage();
+        if( target is null )
+            @target = RandomAlivePlayer();
+        if( target !is null )
         {
-            m.m_hEnemy = EHandle( p );
+            m.m_hEnemy = EHandle( target );
             m.SetConditions( bits_COND_NEW_ENEMY );
         }
     }
@@ -1157,7 +1216,7 @@ void Defeat()
     ClearRemaining();
     g_State = PVE_DEFEAT;
     g_Timer = VICTORY_RESTART;
-    Big( "DEFEAT - the team died " + MAX_TEAM_DEATHS + " times. Restarting in " + int( VICTORY_RESTART ) + "s" );
+    Big( "DEFEAT. Restarting in " + int( VICTORY_RESTART ) + "s" );
 }
 
 // the 90 s ran out with monsters still alive
@@ -1200,6 +1259,12 @@ void RestartMap()
 void PveThink()
 {
     PlayerHud();
+
+    if( g_HostageTotal > 0 && AliveHostages() == 0 && ( g_State == PVE_WAVE || g_State == PVE_CLEARED ) )
+    {
+        Big( "All hostages are dead!" );
+        Defeat();
+    }
 
     if( g_State == PVE_WAITING )
         return;

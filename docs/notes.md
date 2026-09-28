@@ -11,6 +11,10 @@
 - Custom skies: `worldspawn` `skyname` needs `gfx/env/<sky>{bk,dn,ft,lf,rt,up}.tga`; cs2sven.py copies
   them from the Half-Life dirs into `svencoop_addon` and they must be listed in the map `.res`.
 
+- CS `hostage_entity` does not exist in Sven: cs2sven turns them into `info_target pve_hostage` and
+  core.as spawns `monster_scientist` (CLASS_HUMAN_PASSIVE: our CLASS_ALIEN_MILITARY monsters dislike
+  them) with `displayname Hostage`; kill credit / defeat via `IsAlive()` polling.
+
 ## Map script
 - The map script is declared in the map's **`.cfg`**: `map_script NAME` → `scripts/maps/NAME.as`.
   A `map_script` key on worldspawn does nothing (the FGD has no such key).

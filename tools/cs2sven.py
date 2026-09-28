@@ -2,11 +2,12 @@
 
 No decompile, no recompile. Only the entity lump is rewritten:
   * worldspawn         : wad list reduced to basenames (Sven searches its own dirs)
-  * info_player_start  : kept -> player spawns (CT side)
-  * info_player_deathmatch (T side)           -> info_target "pve_mspawn"  (monster spawns)
+  * player side (--player-side ct|t, default ct): its spawns become info_player_start (players)
+  * the other side's spawns                 -> info_target "pve_mspawn"  (monster spawns)
   * func_bomb_target / func_hostage_rescue /
     func_vip_safetyzone / func_escapezone     -> a few info_target "pve_flank" inside the zone
-  * func_buyzone, hostage_entity, armoury_entity, info_hostage_rescue : dropped (CS-only)
+  * hostage_entity                          -> info_target "pve_hostage" (core.as spawns hostage NPCs)
+  * func_buyzone, armoury_entity, info_hostage_rescue : dropped (CS-only)
   * info_node grid generated from the walkable area (reachlib BFS from the first player
     spawn) so Sven's monsters can path-find; the engine builds the .nod graph on first load.
 
@@ -41,6 +42,8 @@ ap.add_argument('--sven', default=os.path.join(STEAM, 'Sven Co-op'))
 ap.add_argument('--tools', default=None, help='cs16-bsp-mini/tools dir (bspents.py, reachlib.py)')
 ap.add_argument('--res-extra', action='append', default=[],
                 help='extra .res file(s) whose lines are appended to NAME.res (e.g. svencoop_addon/cs16_resources.res)')
+ap.add_argument('--player-side', choices=['ct', 't'], default='ct',
+                help='which CS team spawns become the player spawns; the other side spawns the monsters')
 ap.add_argument('--dry-run', action='store_true')
 a = ap.parse_args()
 
@@ -57,7 +60,10 @@ ADDON = os.path.join(a.sven, 'svencoop_addon')
 SVEN_SEARCH = [os.path.join(a.sven, d) for d in ('svencoop_addon', 'svencoop_downloads', 'svencoop')]
 HL_SEARCH = [os.path.join(a.hl, d) for d in ('cstrike', 'cstrike_downloads', 'valve')]
 
-DROP = {'func_buyzone', 'hostage_entity', 'armoury_entity', 'info_hostage_rescue', 'info_vip_start'}
+PLAYER_CLS = 'info_player_start' if a.player_side == 'ct' else 'info_player_deathmatch'
+MONSTER_CLS = 'info_player_deathmatch' if a.player_side == 'ct' else 'info_player_start'
+
+DROP = {'func_buyzone', 'armoury_entity', 'info_hostage_rescue', 'info_vip_start'}
 FLANK_ZONES = {'func_bomb_target', 'func_hostage_rescue', 'func_vip_safetyzone', 'func_escapezone'}
 
 
@@ -89,8 +95,14 @@ for b in bspents.blocks(ents):
         if e.get('model', '').startswith('*'):
             flank_boxes.append(M.models[int(e['model'][1:])][:6])
         continue
-    elif cls == 'info_player_deathmatch':
+    elif cls == MONSTER_CLS:
         e = {'classname': 'info_target', 'targetname': 'pve_mspawn',
+             'origin': e['origin'], 'angles': e.get('angles', '0 0 0')}
+    elif cls == PLAYER_CLS:
+        e['classname'] = 'info_player_start'      # Sven co-op spawn (also the buy zone / NPC anchor)
+    elif cls == 'hostage_entity':
+        # core.as spawns a protectable NPC here; all hostages dead = defeat
+        e = {'classname': 'info_target', 'targetname': 'pve_hostage',
              'origin': e['origin'], 'angles': e.get('angles', '0 0 0')}
     out.append(e)
 
@@ -103,9 +115,9 @@ for (x0, y0, z0, x1, y1, z1) in flank_boxes:
                         'origin': vec((sp[0] * M.G, sp[1] * M.G, sp[2] + 8))})
 
 # ---------------------------------------------------------------- info_nodes
-starts = [origin(e) for e in M.ents if e.get('classname') == 'info_player_start']
+starts = [origin(e) for e in M.ents if e.get('classname') == PLAYER_CLS]
 if not starts:
-    sys.exit('no info_player_start in map')
+    sys.exit('no %s in map' % PLAYER_CLS)
 seen = M.bfs(M.near_spot(starts[0]))
 print('walkable spots', len(seen))
 

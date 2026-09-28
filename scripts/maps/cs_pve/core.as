@@ -25,7 +25,14 @@ const int   KILL_REWARD      = 300;     // per monster killed by a player
 const int   WAVE_BONUS_BASE  = 1000;    // wave-clear bonus = BASE + PER * wave number
 const int   WAVE_BONUS_PER   = 250;
 const int   MAX_MONEY        = 16000;
-const int   KEVLAR_PRICE     = 650;
+const int   KEVLAR_PRICE     = 2600;    // CS $650 x4
+const int   AMMO_PRICE_MULT  = 4;       // CS ammo prices x4
+const int   UPG_MAX_LEVEL    = 3;
+const int   UPG_CLIP_PRICE   = 1000;    // per level: magazine capacity +20% of the gun's base clip (held gun)
+const int   UPG_MAG_PRICE    = 800;     // per level: +2 spare magazines of reserve capacity (held gun)
+const float UPG_CLIP_STEP    = 0.20f;
+const int   UPG_MAG_STEP     = 2;
+const int   WAVE_COUNT_MULT  = 3;       // every wave's monster counts x3 (bosses stay single)
 const float BUYZONE_PAD      = 320.0f;  // fallback buy zone (no stations): box around the CT spawns + padding
 
 // two NPC "stations" at the CT spawn (spawned by the script, no BSP change):
@@ -45,8 +52,10 @@ const float WAVE_TIME        = 90.0f;   // every wave lasts this long; the next 
 const int   SPEED_BONUS_MAX  = 1500;    // pressing the console right after a clear pays this much, shrinking to 0 at 90 s
 const float PENALTY_MAX      = 0.25f;   // uncleared wave -> next wave gets up to +25% HP and damage (by uncleared fraction)
 const int   MAX_TEAM_DEATHS  = 20;      // total deaths of the whole team; one more = defeat
-const int   MAX_ALIVE        = 22;      // concurrent monsters cap
-const int   SPAWN_PER_TICK   = 3;
+const int   MAX_ALIVE        = 40;      // concurrent monsters cap
+const int   SPAWN_PER_TICK   = 4;
+const float SPAWN_POINT_COOLDOWN = 3.0f; // a spawn point is reused only after this many seconds
+const float SPAWN_POINT_CLEAR = 80.0f;   // ... and only if no monster is still standing within this distance
 const float SPAWN_MIN_DIST   = 450.0f;  // never spawn this close to a player
 const int   STRAGGLER_SECS   = 40;      // no enemy for this long -> relocate near players
 const float VICTORY_RESTART  = 25.0f;
@@ -91,11 +100,13 @@ class Gun
     int price;         // CS 1.6 price
     GunSlot slot;
     string ammo;       // ammo entity classname
-    int ammoPrice;     // per magazine
+    int ammoPrice;     // per magazine (CS price, multiplied by AMMO_PRICE_MULT)
     string cat;        // pistol / shotgun / smg / rifle / mg / equip
-    Gun( const string& in c, const string& in l, int p, GunSlot s, const string& in a, int ap, const string& in k )
+    int clip;          // base magazine size
+    int carry;         // base reserve capacity
+    Gun( const string& in c, const string& in l, int p, GunSlot s, const string& in a, int ap, const string& in k, int cl = 0, int ca = 0 )
     {
-        cls = c; label = l; price = p; slot = s; ammo = a; ammoPrice = ap; cat = k;
+        cls = c; label = l; price = p; slot = s; ammo = a; ammoPrice = ap; cat = k; clip = cl; carry = ca;
     }
 }
 
@@ -103,6 +114,8 @@ array<WaveDef@> g_Waves;
 array<Gun@>     g_Guns;
 array<Vector>   g_MainSpawns;
 array<Vector>   g_FlankSpawns;
+array<float>    g_MainLast;      // last spawn time per point
+array<float>    g_FlankLast;
 array<Vector>   g_Stations;      // arms dealer position(s)
 Vector          g_DevicePos;
 bool            g_HasDevice = false;
@@ -149,37 +162,39 @@ void AddWave( WaveDef@ w ) { g_Waves.insertLast( w ); }
 void BuildGuns()
 {
     // pistols (CS 1.6 prices; ammo price per magazine)
-    g_Guns.insertLast( Gun( "weapon_csglock18",  "Glock 18",        400, SLOT_PISTOL,  "ammo_csglock18",  20, "pistol" ) );
-    g_Guns.insertLast( Gun( "weapon_usp",        "USP .45",         500, SLOT_PISTOL,  "ammo_usp",        25, "pistol" ) );
-    g_Guns.insertLast( Gun( "weapon_p228",       "P228",            600, SLOT_PISTOL,  "ammo_p228",       50, "pistol" ) );
-    g_Guns.insertLast( Gun( "weapon_csdeagle",   "Desert Eagle",    650, SLOT_PISTOL,  "ammo_csdeagle",   40, "pistol" ) );
-    g_Guns.insertLast( Gun( "weapon_fiveseven",  "Five-Seven",      750, SLOT_PISTOL,  "ammo_fiveseven",  50, "pistol" ) );
-    g_Guns.insertLast( Gun( "weapon_dualelites", "Dual Elites",     800, SLOT_PISTOL,  "ammo_dualelites", 20, "pistol" ) );
+    g_Guns.insertLast( Gun( "weapon_csglock18",  "Glock 18",        400, SLOT_PISTOL,  "ammo_csglock18",  20, "pistol", 20, 120 ) );
+    g_Guns.insertLast( Gun( "weapon_usp",        "USP .45",         500, SLOT_PISTOL,  "ammo_usp",        25, "pistol", 12, 100 ) );
+    g_Guns.insertLast( Gun( "weapon_p228",       "P228",            600, SLOT_PISTOL,  "ammo_p228",       50, "pistol", 13, 52 ) );
+    g_Guns.insertLast( Gun( "weapon_csdeagle",   "Desert Eagle",    650, SLOT_PISTOL,  "ammo_csdeagle",   40, "pistol", 7, 35 ) );
+    g_Guns.insertLast( Gun( "weapon_fiveseven",  "Five-Seven",      750, SLOT_PISTOL,  "ammo_fiveseven",  50, "pistol", 20, 100 ) );
+    g_Guns.insertLast( Gun( "weapon_dualelites", "Dual Elites",     800, SLOT_PISTOL,  "ammo_dualelites", 20, "pistol", 30, 120 ) );
     // shotguns
-    g_Guns.insertLast( Gun( "weapon_m3",         "M3 Super 90",    1700, SLOT_PRIMARY, "ammo_m3",         65, "shotgun" ) );
-    g_Guns.insertLast( Gun( "weapon_xm1014",     "XM1014",         3000, SLOT_PRIMARY, "ammo_xm1014",     65, "shotgun" ) );
+    g_Guns.insertLast( Gun( "weapon_m3",         "M3 Super 90",    1700, SLOT_PRIMARY, "ammo_m3",         65, "shotgun", 8, 32 ) );
+    g_Guns.insertLast( Gun( "weapon_xm1014",     "XM1014",         3000, SLOT_PRIMARY, "ammo_xm1014",     65, "shotgun", 7, 32 ) );
     // smgs
-    g_Guns.insertLast( Gun( "weapon_tmp",        "TMP",            1250, SLOT_PRIMARY, "ammo_tmp",        20, "smg" ) );
-    g_Guns.insertLast( Gun( "weapon_mac10",      "MAC-10",         1400, SLOT_PRIMARY, "ammo_mac10",      25, "smg" ) );
-    g_Guns.insertLast( Gun( "weapon_mp5navy",    "MP5 Navy",       1500, SLOT_PRIMARY, "ammo_mp5navy",    20, "smg" ) );
-    g_Guns.insertLast( Gun( "weapon_ump45",      "UMP45",          1700, SLOT_PRIMARY, "ammo_ump45",      25, "smg" ) );
-    g_Guns.insertLast( Gun( "weapon_p90",        "P90",            2350, SLOT_PRIMARY, "ammo_p90",        50, "smg" ) );
+    g_Guns.insertLast( Gun( "weapon_tmp",        "TMP",            1250, SLOT_PRIMARY, "ammo_tmp",        20, "smg", 30, 120 ) );
+    g_Guns.insertLast( Gun( "weapon_mac10",      "MAC-10",         1400, SLOT_PRIMARY, "ammo_mac10",      25, "smg", 30, 100 ) );
+    g_Guns.insertLast( Gun( "weapon_mp5navy",    "MP5 Navy",       1500, SLOT_PRIMARY, "ammo_mp5navy",    20, "smg", 30, 120 ) );
+    g_Guns.insertLast( Gun( "weapon_ump45",      "UMP45",          1700, SLOT_PRIMARY, "ammo_ump45",      25, "smg", 25, 100 ) );
+    g_Guns.insertLast( Gun( "weapon_p90",        "P90",            2350, SLOT_PRIMARY, "ammo_p90",        50, "smg", 50, 100 ) );
     // rifles
-    g_Guns.insertLast( Gun( "weapon_galil",      "Galil",          2000, SLOT_PRIMARY, "ammo_galil",      60, "rifle" ) );
-    g_Guns.insertLast( Gun( "weapon_famas",      "FAMAS",          2250, SLOT_PRIMARY, "ammo_famas",      60, "rifle" ) );
-    g_Guns.insertLast( Gun( "weapon_ak47",       "AK-47",          2500, SLOT_PRIMARY, "ammo_ak47",       80, "rifle" ) );
-    g_Guns.insertLast( Gun( "weapon_scout",      "Scout",          2750, SLOT_PRIMARY, "ammo_scout",      80, "rifle" ) );
-    g_Guns.insertLast( Gun( "weapon_m4a1",       "M4A1",           3100, SLOT_PRIMARY, "ammo_m4a1",       60, "rifle" ) );
-    g_Guns.insertLast( Gun( "weapon_aug",        "AUG",            3500, SLOT_PRIMARY, "ammo_aug",        60, "rifle" ) );
-    g_Guns.insertLast( Gun( "weapon_sg552",      "SG552",          3500, SLOT_PRIMARY, "ammo_sg552",      60, "rifle" ) );
-    g_Guns.insertLast( Gun( "weapon_sg550",      "SG550",          4200, SLOT_PRIMARY, "ammo_sg550",      60, "rifle" ) );
-    g_Guns.insertLast( Gun( "weapon_awp",        "AWP",            4750, SLOT_PRIMARY, "ammo_awp",       125, "rifle" ) );
-    g_Guns.insertLast( Gun( "weapon_g3sg1",      "G3SG1",          5000, SLOT_PRIMARY, "ammo_g3sg1",      80, "rifle" ) );
+    g_Guns.insertLast( Gun( "weapon_galil",      "Galil",          2000, SLOT_PRIMARY, "ammo_galil",      60, "rifle", 35, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_famas",      "FAMAS",          2250, SLOT_PRIMARY, "ammo_famas",      60, "rifle", 25, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_ak47",       "AK-47",          2500, SLOT_PRIMARY, "ammo_ak47",       80, "rifle", 30, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_scout",      "Scout",          2750, SLOT_PRIMARY, "ammo_scout",      80, "rifle", 10, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_m4a1",       "M4A1",           3100, SLOT_PRIMARY, "ammo_m4a1",       60, "rifle", 30, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_aug",        "AUG",            3500, SLOT_PRIMARY, "ammo_aug",        60, "rifle", 30, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_sg552",      "SG552",          3500, SLOT_PRIMARY, "ammo_sg552",      60, "rifle", 30, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_sg550",      "SG550",          4200, SLOT_PRIMARY, "ammo_sg550",      60, "rifle", 30, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_awp",        "AWP",            4750, SLOT_PRIMARY, "ammo_awp",       125, "rifle", 10, 30 ) );
+    g_Guns.insertLast( Gun( "weapon_g3sg1",      "G3SG1",          5000, SLOT_PRIMARY, "ammo_g3sg1",      80, "rifle", 20, 90 ) );
     // machine gun
-    g_Guns.insertLast( Gun( "weapon_csm249",     "M249",           5750, SLOT_PRIMARY, "ammo_csm249",     60, "mg" ) );
+    g_Guns.insertLast( Gun( "weapon_csm249",     "M249",           5750, SLOT_PRIMARY, "ammo_csm249",     60, "mg", 100, 200 ) );
     // equipment
     g_Guns.insertLast( Gun( "weapon_hegrenade",  "HE Grenade",      300, SLOT_NONE,    "",                 0, "equip" ) );
     g_Guns.insertLast( Gun( "kevlar",            "Kevlar (100 armor)", KEVLAR_PRICE, SLOT_NONE, "",       0, "equip" ) );
+    g_Guns.insertLast( Gun( "upg_clip",          "Upgrade held gun: magazine +20%  ($" + UPG_CLIP_PRICE + " x level)", UPG_CLIP_PRICE, SLOT_NONE, "", 0, "equip" ) );
+    g_Guns.insertLast( Gun( "upg_mag",           "Upgrade held gun: +2 spare mags  ($" + UPG_MAG_PRICE + " x level)",  UPG_MAG_PRICE,  SLOT_NONE, "", 0, "equip" ) );
 }
 
 // mirrors cs16/cs16_register.as (which cannot be a second map_script because it defines MapInit)
@@ -201,7 +216,7 @@ void SetupCS16Weapons()
     RegisterAll();
 }
 
-string ItemText( Gun@ g ) { return g.label + "  $" + g.price; }
+string ItemText( Gun@ g ) { return ( g.cls == "upg_clip" || g.cls == "upg_mag" ) ? g.label : g.label + "  $" + g.price; }
 
 CTextMenu@ MakeGunMenu( const string& in title, const string& in cat )
 {
@@ -495,6 +510,82 @@ void SpawnBuyStations( const array<Vector>& in spawns, const array<float>& in ya
     g_Game.AlertMessage( at_console, "[cs_pve] buy stations: %1, device: %2\n", g_Stations.length(), g_HasDevice ? 1 : 0 );
 }
 
+dictionary g_ClipLvl;   // "steamid|weapon_x" -> level
+dictionary g_MagLvl;
+
+string UpgKey( CBasePlayer@ p, const string& in cls ) { return PlayerKey( p ) + "|" + cls; }
+int ClipLevel( CBasePlayer@ p, const string& in cls ) { string k = UpgKey( p, cls ); return g_ClipLvl.exists( k ) ? int( g_ClipLvl[k] ) : 0; }
+int MagLevel( CBasePlayer@ p, const string& in cls )  { string k = UpgKey( p, cls ); return g_MagLvl.exists( k ) ? int( g_MagLvl[k] ) : 0; }
+int ClipBonus( CBasePlayer@ p, Gun@ g ) { return int( float( g.clip ) * UPG_CLIP_STEP * float( ClipLevel( p, g.cls ) ) + 0.999f ); }
+int CarryCap( CBasePlayer@ p, Gun@ g )  { return g.carry + UPG_MAG_STEP * MagLevel( p, g.cls ) * g.clip; }
+
+Gun@ GunByClass( const string& in cls )
+{
+    for( uint i = 0; i < g_Guns.length(); ++i )
+        if( g_Guns[i].cls == cls ) return g_Guns[i];
+    return null;
+}
+
+// the gun the player is holding right now (pistol or primary), or null
+Gun@ ActiveGun( CBasePlayer@ p )
+{
+    CBaseEntity@ act = p.m_hActiveItem.GetEntity();
+    if( act is null ) return null;
+    Gun@ g = GunByClass( act.GetClassname() );
+    if( g is null || g.slot == SLOT_NONE ) return null;
+    return g;
+}
+
+void BuyUpgrade( CBasePlayer@ p, bool clipUpgrade )
+{
+    Gun@ g = ActiveGun( p );
+    if( g is null )
+    {
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Hold the gun you want to upgrade" );
+        return;
+    }
+    int lvl = clipUpgrade ? ClipLevel( p, g.cls ) : MagLevel( p, g.cls );
+    if( lvl >= UPG_MAX_LEVEL )
+    {
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + " is already at max level" );
+        return;
+    }
+    int price = ( clipUpgrade ? UPG_CLIP_PRICE : UPG_MAG_PRICE ) * ( lvl + 1 );
+    int money = GetMoney( p );
+    if( money < price )
+    {
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Not enough money: level " + ( lvl + 1 ) + " costs $" + price );
+        return;
+    }
+    string k = UpgKey( p, g.cls );
+    if( clipUpgrade ) g_ClipLvl[k] = lvl + 1; else g_MagLvl[k] = lvl + 1;
+    SetMoney( p, money - price );
+    if( clipUpgrade )
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + " magazine: " + ( g.clip + ClipBonus( p, g ) ) + " rounds (level " + ( lvl + 1 ) + ")  -$" + price );
+    else
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + " reserve: " + CarryCap( p, g ) + " rounds (level " + ( lvl + 1 ) + ")  -$" + price );
+}
+
+// bigger magazines: right after a full reload (clip == base) top the clip up from the reserve
+HookReturnCode OnPlayerPostThink( CBasePlayer@ p )
+{
+    if( p is null || !p.IsAlive() ) return HOOK_CONTINUE;
+    Gun@ g = ActiveGun( p );
+    if( g is null || g.clip <= 0 ) return HOOK_CONTINUE;
+    int bonus = ClipBonus( p, g );
+    if( bonus <= 0 ) return HOOK_CONTINUE;
+    CBasePlayerWeapon@ w = cast<CBasePlayerWeapon@>( p.m_hActiveItem.GetEntity() );
+    if( w is null || w.m_iClip != g.clip ) return HOOK_CONTINUE;
+    int type = w.m_iPrimaryAmmoType;
+    if( type < 0 ) return HOOK_CONTINUE;
+    int reserve = p.m_rgAmmo( type );
+    int add = reserve < bonus ? reserve : bonus;
+    if( add <= 0 ) return HOOK_CONTINUE;
+    w.m_iClip = g.clip + add;
+    p.m_rgAmmo( type, reserve - add );
+    return HOOK_CONTINUE;
+}
+
 void OpenBuyMenu( CBasePlayer@ p )
 {
     if( p is null || !CanBuy( p ) ) return;
@@ -516,6 +607,8 @@ void BuyGun( CBasePlayer@ p, int idx )
 {
     if( !CanBuy( p ) ) return;
     Gun@ g = g_Guns[idx];
+    if( g.cls == "upg_clip" ) { BuyUpgrade( p, true );  return; }
+    if( g.cls == "upg_mag" )  { BuyUpgrade( p, false ); return; }
     int money = GetMoney( p );
     if( money < g.price )
     {
@@ -561,15 +654,33 @@ void BuyAmmo( CBasePlayer@ p, GunSlot slot )
         g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, slot == SLOT_PRIMARY ? "No primary weapon" : "No pistol" );
         return;
     }
+    int price = g.ammoPrice * AMMO_PRICE_MULT;
     int money = GetMoney( p );
-    if( money < g.ammoPrice )
+    if( money < price )
     {
-        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Not enough money: ammo costs $" + g.ammoPrice );
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Not enough money: ammo costs $" + price );
         return;
     }
-    p.GiveNamedItem( g.ammo );
-    SetMoney( p, money - g.ammoPrice );
-    g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + " ammo  -$" + g.ammoPrice );
+    CBasePlayerWeapon@ w = cast<CBasePlayerWeapon@>( p.HasNamedPlayerItem( g.cls ) );
+    if( w is null || w.m_iPrimaryAmmoType < 0 || g.clip <= 0 )
+    {
+        p.GiveNamedItem( g.ammo );      // fallback: let the weapon pack handle it
+    }
+    else
+    {
+        int type = w.m_iPrimaryAmmoType;
+        int cur = p.m_rgAmmo( type );
+        int cap = CarryCap( p, g );
+        if( cur >= cap )
+        {
+            g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Reserve full (" + cap + ")" );
+            return;
+        }
+        int nv = cur + g.clip; if( nv > cap ) nv = cap;
+        p.m_rgAmmo( type, nv );
+    }
+    SetMoney( p, money - price );
+    g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + " ammo  -$" + price );
 }
 
 // one pistol + one primary: drop extras picked up from the floor (keeps the active one)
@@ -682,6 +793,7 @@ void PveMapInit()
     g_Hooks.RegisterHook( Hooks::Player::PlayerUse, @OnPlayerUse );
     g_Hooks.RegisterHook( Hooks::Player::PlayerTakeDamage, @OnPlayerTakeDamage );
     g_Hooks.RegisterHook( Hooks::Player::PlayerKilled, @OnPlayerKilled );
+    g_Hooks.RegisterHook( Hooks::Player::PlayerPostThink, @OnPlayerPostThink );
     g_Scheduler.SetInterval( "PveThink", THINK_INTERVAL, g_Scheduler.REPEAT_INFINITE_TIMES );
 }
 
@@ -689,10 +801,16 @@ void PveMapActivate()
 {
     CBaseEntity@ e = null;
     while( ( @e = g_EntityFuncs.FindEntityByTargetname( e, "pve_mspawn" ) ) !is null )
+    {
         g_MainSpawns.insertLast( e.pev.origin );
+        g_MainLast.insertLast( -100.0f );
+    }
     @e = null;
     while( ( @e = g_EntityFuncs.FindEntityByTargetname( e, "pve_flank" ) ) !is null )
+    {
         g_FlankSpawns.insertLast( e.pev.origin );
+        g_FlankLast.insertLast( -100.0f );
+    }
 
     // buy zone: box around the player spawns (fallback) + weapon crates at the spawns
     array<Vector> spawns;
@@ -779,24 +897,44 @@ CBasePlayer@ RandomAlivePlayer()
     return ps[ Math.RandomLong( 0, ps.length() - 1 ) ];
 }
 
+bool MonsterNear( const Vector& in pos, float dist )
+{
+    for( uint i = 0; i < g_Alive.length(); ++i )
+    {
+        CBaseEntity@ e = g_Alive[i].GetEntity();
+        if( e !is null && ( e.pev.origin - pos ).Length() < dist ) return true;
+    }
+    return false;
+}
+
+// a free spawn point: not used in the last SPAWN_POINT_COOLDOWN s, no monster still standing on it,
+// not right next to a player. Returns false when every point is busy (spawning then waits a tick).
 bool PickSpawn( bool allowFlank, Vector& out pos )
 {
-    array<Vector> pool;
-    if( allowFlank && g_FlankSpawns.length() > 0 && Math.RandomLong( 0, 99 ) < 35 )
-        pool = g_FlankSpawns;
-    else
-        pool = g_MainSpawns;
-    if( pool.length() == 0 ) return false;
-
-    for( int attempt = 0; attempt < 12; ++attempt )
+    bool useFlank = allowFlank && g_FlankSpawns.length() > 0 && Math.RandomLong( 0, 99 ) < 35;
+    for( int pass = 0; pass < 2; ++pass )
     {
-        Vector cand = pool[ Math.RandomLong( 0, pool.length() - 1 ) ];
-        float d;
-        NearestPlayer( cand, d );
-        if( d >= SPAWN_MIN_DIST ) { pos = cand; return true; }
+        array<Vector>@ pool = useFlank ? @g_FlankSpawns : @g_MainSpawns;
+        array<float>@ last = useFlank ? @g_FlankLast : @g_MainLast;
+        if( pool.length() > 0 )
+        {
+            int start = Math.RandomLong( 0, pool.length() - 1 );
+            for( uint k = 0; k < pool.length(); ++k )
+            {
+                int i = ( start + int( k ) ) % int( pool.length() );
+                if( g_Engine.time - last[i] < SPAWN_POINT_COOLDOWN ) continue;
+                if( MonsterNear( pool[i], SPAWN_POINT_CLEAR ) ) continue;
+                float d;
+                NearestPlayer( pool[i], d );
+                if( d < SPAWN_MIN_DIST ) continue;
+                last[i] = g_Engine.time;
+                pos = pool[i];
+                return true;
+            }
+        }
+        useFlank = !useFlank;   // try the other pool
     }
-    pos = pool[ Math.RandomLong( 0, pool.length() - 1 ) ];
-    return true;
+    return false;
 }
 
 Vector SpawnNearPlayer( CBasePlayer@ p )
@@ -873,8 +1011,8 @@ void StartWave( int idx )
     g_IdleSecs.resize( 0 );
     for( uint i = 0; i < w.spawns.length(); ++i )
     {
-        int n = int( float( w.spawns[i].count ) * scale + 0.5f );
-        if( w.spawns[i].count == 1 ) n = 1;
+        int n = int( float( w.spawns[i].count * WAVE_COUNT_MULT ) * scale + 0.5f );
+        if( w.spawns[i].count == 1 ) n = 1;     // bosses stay single
         for( int k = 0; k < n; ++k ) g_Queue.insertLast( w.spawns[i].cls );
     }
     for( uint i = g_Queue.length(); i > 1; --i )
@@ -890,15 +1028,15 @@ void StartWave( int idx )
 }
 
 
-void SpawnOne( const string& in cls, float healthMult, bool allowFlank )
+bool SpawnOne( const string& in cls, float healthMult, bool allowFlank )
 {
     Vector pos;
-    if( !PickSpawn( allowFlank, pos ) ) return;
+    if( !PickSpawn( allowFlank, pos ) ) return false;
     pos.z += 8.0f;
     Vector ang( 0, Math.RandomFloat( 0, 360 ), 0 );
 
     CBaseEntity@ e = g_EntityFuncs.Create( cls, pos, ang, false, null );
-    if( e is null ) return;
+    if( e is null ) return true;    // bad class: drop it from the queue
     g_EntityFuncs.DispatchSpawn( e.edict() );
 
     e.SetClassification( CLASS_ALIEN_MILITARY );
@@ -917,6 +1055,7 @@ void SpawnOne( const string& in cls, float healthMult, bool allowFlank )
     }
     g_Alive.insertLast( EHandle( e ) );
     g_IdleSecs.insertLast( 0 );
+    return true;
 }
 
 int PruneAndCountAlive()
@@ -1106,8 +1245,8 @@ void PveThink()
     while( g_Queue.length() > 0 && alive < MAX_ALIVE && spawned < SPAWN_PER_TICK )
     {
         string cls = g_Queue[ g_Queue.length() - 1 ];
+        if( !SpawnOne( cls, g_WaveHpMult, w.flank ) ) break;   // every point busy: wait a second
         g_Queue.removeLast();
-        SpawnOne( cls, g_WaveHpMult, w.flank );
         ++alive; ++spawned;
     }
 

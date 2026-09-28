@@ -1,6 +1,6 @@
 de_dust2 PVE - Monster Survival (CS economy)
 
-Hold the map together against 10 waves of monsters.
+Hold the map together against 15 waves of monsters.
 Monsters come from the T-side; later waves also flank from the bomb sites.
 Every wave lasts 90 seconds. Clear it, then press E on the Next Wave console:
 the sooner you press, the bigger the speed bonus for everyone.
@@ -13,6 +13,8 @@ BUYING (Counter-Strike rules)
 - Walk up to the Arms Dealer in spawn and press E to buy (the HUD shows [BUY ZONE]).
 - One pistol + one primary. Buying into a taken slot drops the old gun.
 - Kills pay $300, each cleared wave pays a bonus, fast console presses pay more.
+- Ammo and Kevlar are pricey (4x CS). Equipment menu: upgrade the gun in your hands
+  (magazine +20% / level, +2 spare mags / level, 3 levels each, priced separately).
 
 Optional binds (E on a crate already works):
   bind b ".buy"

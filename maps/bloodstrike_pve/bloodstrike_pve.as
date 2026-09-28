@@ -17,7 +17,7 @@ void BuildWaves()
     AddWave( w );
 
     @w = WaveDef( "Wave 2 - The Dead Walk", 1.0f, false );
-    w.spawns.insertLast( SpawnDef( "monster_zombie", 6 ) );
+    w.spawns.insertLast( SpawnDef( "monster_zombie", 4 ) );
     w.spawns.insertLast( SpawnDef( "monster_houndeye", 4 ) );
     AddWave( w );
 
@@ -33,7 +33,7 @@ void BuildWaves()
 
     @w = WaveDef( "Wave 5 - BOSS: Baby Gargantua", 1.2f, false );
     w.spawns.insertLast( SpawnDef( "monster_babygarg", 1 ) );
-    w.spawns.insertLast( SpawnDef( "monster_zombie", 6 ) );
+    w.spawns.insertLast( SpawnDef( "monster_zombie", 4 ) );
     w.spawns.insertLast( SpawnDef( "monster_headcrab", 6 ) );
     AddWave( w );
 
@@ -61,9 +61,43 @@ void BuildWaves()
     w.spawns.insertLast( SpawnDef( "monster_alien_voltigore", 2 ) );
     AddWave( w );
 
-    @w = WaveDef( "Wave 10 - FINAL BOSS: Gargantua", 1.4f, true );
+    @w = WaveDef( "Wave 10 - BOSS: Gargantua", 1.4f, true );
     w.spawns.insertLast( SpawnDef( "monster_gargantua", 1 ) );
     w.spawns.insertLast( SpawnDef( "monster_alien_grunt", 4 ) );
+    w.spawns.insertLast( SpawnDef( "monster_alien_slave", 4 ) );
+    AddWave( w );
+
+    @w = WaveDef( "Wave 11 - Grunt Battalion", 1.3f, true );
+    w.spawns.insertLast( SpawnDef( "monster_human_grunt", 4 ) );
+    w.spawns.insertLast( SpawnDef( "monster_hwgrunt", 1 ) );
+    w.spawns.insertLast( SpawnDef( "monster_robogrunt", 2 ) );
+    AddWave( w );
+
+    @w = WaveDef( "Wave 12 - Xen Swarm", 1.35f, true );
+    w.spawns.insertLast( SpawnDef( "monster_alien_grunt", 4 ) );
+    w.spawns.insertLast( SpawnDef( "monster_alien_slave", 4 ) );
+    w.spawns.insertLast( SpawnDef( "monster_bullchicken", 3 ) );
+    w.spawns.insertLast( SpawnDef( "monster_houndeye", 4 ) );
+    AddWave( w );
+
+    @w = WaveDef( "Wave 13 - Race X Assault", 1.4f, true );
+    w.spawns.insertLast( SpawnDef( "monster_shocktrooper", 4 ) );
+    w.spawns.insertLast( SpawnDef( "monster_pitdrone", 4 ) );
+    w.spawns.insertLast( SpawnDef( "monster_alien_voltigore", 2 ) );
+    AddWave( w );
+
+    @w = WaveDef( "Wave 14 - Undead Horde", 1.4f, true );
+    w.spawns.insertLast( SpawnDef( "monster_zombie_soldier", 4 ) );
+    w.spawns.insertLast( SpawnDef( "monster_gonome", 4 ) );
+    w.spawns.insertLast( SpawnDef( "monster_zombie", 4 ) );
+    w.spawns.insertLast( SpawnDef( "monster_babygarg", 1 ) );
+    AddWave( w );
+
+    @w = WaveDef( "Wave 15 - FINAL: Twin Gargantua", 1.5f, true );
+    w.spawns.insertLast( SpawnDef( "monster_gargantua", 1 ) );
+    w.spawns.insertLast( SpawnDef( "monster_babygarg", 1 ) );
+    w.spawns.insertLast( SpawnDef( "monster_alien_grunt", 4 ) );
+    w.spawns.insertLast( SpawnDef( "monster_shocktrooper", 3 ) );
     w.spawns.insertLast( SpawnDef( "monster_alien_slave", 4 ) );
     AddWave( w );
 }

@@ -42,7 +42,8 @@ wad copied over and its CS-only entities swapped out.
 ## How `dust2_pve` plays
 
 - players spawn on the CT side; monsters come from the T spawns, later waves also from the bomb sites
-- 10 themed waves (headcrabs → zombies → vortigaunts → soldiers → baby gargantua boss → … → gargantua)
+- 15 themed waves (headcrabs → zombies → vortigaunts → soldiers → baby gargantua → … → gargantua → Race X → twin gargantua finale), counts x3 of the table, bosses single
+- spawn points are spread: a point is reused only after 3 s and only when no monster is still standing on it
 - every wave lasts 90 s. Clear it early, then press E on the Next Wave console: the sooner, the bigger the speed bonus (up to $1500 each)
 - not cleared in 90 s: the leftovers are removed and the next wave gets up to +25% HP and damage (by the uncleared fraction)
 - team lives: 20 deaths in total = defeat; dying also loses your guns
@@ -51,7 +52,8 @@ wad copied over and its CS-only entities swapped out.
 - Counter-Strike economy: knife + USP + $800 at start, $300 per kill, a bonus per cleared wave
 - buy from the Arms Dealer NPCs in spawn: walk up and press E (no binds needed); one pistol + one primary (buying into a taken slot drops the old gun)
 - `bind b ".buy"`, `bind , ".buyammo1"` (primary ammo), `bind . ".buyammo2"` (pistol ammo); or say `buy` in chat
-- guns and prices are CS 1.6's (AK-47 $2500, M4A1 $3100, AWP $4750, AUG $3500, ...) via KernCore's weapon pack
+- guns and prices are CS 1.6's (AK-47 $2500, M4A1 $3100, AWP $4750, AUG $3500, ...) via KernCore's weapon pack; ammo and Kevlar cost 4x CS
+- Equipment menu upgrades for the gun you are holding, 3 levels each, priced separately: magazine +20% per level ($1000 x level), +2 spare magazines of reserve per level ($800 x level)
 
 Tune constants at the top of `maps/dust2_pve/dust2_pve.as` or the wave table in `BuildWaves()`,
 rerun `cs2sven.py` (the BSP is only rewritten when it actually changes, so the node graph cache survives).

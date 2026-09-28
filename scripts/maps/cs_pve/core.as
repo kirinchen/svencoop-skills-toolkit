@@ -48,8 +48,8 @@ const float  STATION_BUY_DIST = 256.0f; // the buy zone around the dealer (for B
 
 const float THINK_INTERVAL   = 1.0f;
 const float START_COUNTDOWN  = 30.0f;   // seconds after the first player spawns
-const float WAVE_TIME        = 90.0f;   // every wave lasts this long; the next one starts when it runs out
-const int   SPEED_BONUS_MAX  = 1500;    // pressing the console right after a clear pays this much, shrinking to 0 at 90 s
+const float WAVE_TIME        = 180.0f;  // every wave lasts this long (3 min); the next one starts when it runs out
+const int   SPEED_BONUS_MAX  = 1500;    // pressing the console right after a clear pays this much, shrinking to 0 at the end of the wave timer
 const float PENALTY_MAX      = 0.25f;   // uncleared wave -> next wave gets up to +25% HP and damage (by uncleared fraction)
 const int   MAX_TEAM_DEATHS  = 20;      // total deaths of the whole team; one more = defeat
 const int   MAX_ALIVE        = 40;      // concurrent monsters cap

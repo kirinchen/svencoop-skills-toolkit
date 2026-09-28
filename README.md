@@ -44,8 +44,8 @@ wad copied over and its CS-only entities swapped out.
 - players spawn on the CT side; monsters come from the T spawns, later waves also from the bomb sites
 - 15 themed waves (headcrabs → zombies → vortigaunts → soldiers → baby gargantua → … → gargantua → Race X → twin gargantua finale), counts x3 of the table, bosses single
 - spawn points are spread: a point is reused only after 3 s and only when no monster is still standing on it
-- every wave lasts 90 s. Clear it early, then press E on the Next Wave console: the sooner, the bigger the speed bonus (up to $1500 each)
-- not cleared in 90 s: the leftovers are removed and the next wave gets up to +25% HP and damage (by the uncleared fraction)
+- every wave lasts 3 min. Clear it early, then press E on the Next Wave console: the sooner, the bigger the speed bonus (up to $1500 each)
+- not cleared in 3 min: the leftovers are removed and the next wave gets up to +25% HP and damage (by the uncleared fraction)
 - team lives: 20 deaths in total = defeat; dying also loses your guns
 - monster count scales with player count; clearing a wave heals everyone and pays a bonus
 - monsters that never find a player are pushed onto the nearest one

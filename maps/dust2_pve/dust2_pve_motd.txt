@@ -2,7 +2,7 @@ de_dust2 PVE - Monster Survival (CS economy)
 
 Hold the map together against 15 waves of monsters.
 Monsters come from the T-side; later waves also flank from the bomb sites.
-Every wave lasts 90 seconds. Clear it, then press E on the Next Wave console:
+Every wave lasts 3 minutes. Clear it, then press E on the Next Wave console:
 the sooner you press, the bigger the speed bonus for everyone.
 Not cleared in time? Leftovers vanish and the next wave gets up to +25% HP/damage.
 20 team deaths in total = defeat. Dying loses your guns.

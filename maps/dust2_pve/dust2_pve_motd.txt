@@ -11,10 +11,11 @@ Wave 5 and wave 10 are boss waves.
 BUYING (Counter-Strike rules)
 - You start with a knife, a USP and $800. Kills pay $300, wave clears pay a bonus.
 - Walk up to the Arms Dealer in spawn and press E to buy (the HUD shows [BUY ZONE]).
-- One pistol + one primary. Buying into a taken slot drops the old gun.
+- One gun per category: [2] pistol/shotgun, [3] SMG, [4] rifle, [5] MG. Buying into a taken
+  category drops the old gun. Buy the same gun again to upgrade it (spare mags, then magazine size).
 - Kills pay $300, each cleared wave pays a bonus, fast console presses pay more.
-- Ammo and Kevlar are pricey (4x CS). Equipment menu: upgrade the gun in your hands
-  (magazine +20% / level, +2 spare mags / level, 3 levels each, priced separately).
+- Ammo: pick a category in the Ammo menu, get one magazine, pay rounds x per-round price.
+  Kevlar $2600.
 
 Optional binds (E on a crate already works):
   bind b ".buy"

@@ -27,9 +27,7 @@ const int   WAVE_BONUS_PER   = 250;
 const int   MAX_MONEY        = 16000;
 const int   KEVLAR_PRICE     = 2600;    // CS $650 x4
 const int   AMMO_PRICE_MULT  = 4;       // CS ammo prices x4
-const int   UPG_MAX_LEVEL    = 3;
-const int   UPG_CLIP_PRICE   = 1000;    // per level: magazine capacity +20% of the gun's base clip (held gun)
-const int   UPG_MAG_PRICE    = 800;     // per level: +2 spare magazines of reserve capacity (held gun)
+const int   UPG_MAX_LEVEL    = 2;       // upgrades per kind (spare mags / magazine size); buying an owned gun again upgrades it
 const float UPG_CLIP_STEP    = 0.20f;
 const int   UPG_MAG_STEP     = 2;
 const int   WAVE_COUNT_MULT  = 3;       // every wave's monster counts x3 (bosses stay single)
@@ -76,11 +74,22 @@ enum PveState
     PVE_DEFEAT
 }
 
-enum GunSlot
+// weapon categories: one gun per category (knife is always there)
+const int CAT_NONE  = 0;   // grenades, armour
+const int CAT_SIDE  = 2;   // pistol OR shotgun
+const int CAT_SMG   = 3;
+const int CAT_RIFLE = 4;   // rifles and sniper rifles
+const int CAT_MG    = 5;
+const int CAT_MIN   = 2;
+const int CAT_MAX   = 5;
+
+int CategoryOf( const string& in cat )
 {
-    SLOT_NONE = 0,      // grenades, armour
-    SLOT_PISTOL = 1,
-    SLOT_PRIMARY = 2
+    if( cat == "pistol" || cat == "shotgun" ) return CAT_SIDE;
+    if( cat == "smg" )   return CAT_SMG;
+    if( cat == "rifle" ) return CAT_RIFLE;
+    if( cat == "mg" )    return CAT_MG;
+    return CAT_NONE;
 }
 
 class SpawnDef
@@ -104,15 +113,16 @@ class Gun
     string cls;        // entity classname (KernCore pack)
     string label;      // menu text
     int price;         // CS 1.6 price
-    GunSlot slot;
+    int slot;          // category (CAT_*), derived from cat
     string ammo;       // ammo entity classname
     int ammoPrice;     // per magazine (CS price, multiplied by AMMO_PRICE_MULT)
     string cat;        // pistol / shotgun / smg / rifle / mg / equip
     int clip;          // base magazine size
     int carry;         // base reserve capacity
-    Gun( const string& in c, const string& in l, int p, GunSlot s, const string& in a, int ap, const string& in k, int cl = 0, int ca = 0 )
+    Gun( const string& in c, const string& in l, int p, int s, const string& in a, int ap, const string& in k, int cl = 0, int ca = 0 )
     {
-        cls = c; label = l; price = p; slot = s; ammo = a; ammoPrice = ap; cat = k; clip = cl; carry = ca;
+        cls = c; label = l; price = p; ammo = a; ammoPrice = ap; cat = k; clip = cl; carry = ca;
+        slot = CategoryOf( k );
     }
 }
 
@@ -170,39 +180,37 @@ void AddWave( WaveDef@ w ) { g_Waves.insertLast( w ); }
 void BuildGuns()
 {
     // pistols (CS 1.6 prices; ammo price per magazine)
-    g_Guns.insertLast( Gun( "weapon_csglock18",  "Glock 18",        400, SLOT_PISTOL,  "ammo_csglock18",  20, "pistol", 20, 120 ) );
-    g_Guns.insertLast( Gun( "weapon_usp",        "USP .45",         500, SLOT_PISTOL,  "ammo_usp",        25, "pistol", 12, 100 ) );
-    g_Guns.insertLast( Gun( "weapon_p228",       "P228",            600, SLOT_PISTOL,  "ammo_p228",       50, "pistol", 13, 52 ) );
-    g_Guns.insertLast( Gun( "weapon_csdeagle",   "Desert Eagle",    650, SLOT_PISTOL,  "ammo_csdeagle",   40, "pistol", 7, 35 ) );
-    g_Guns.insertLast( Gun( "weapon_fiveseven",  "Five-Seven",      750, SLOT_PISTOL,  "ammo_fiveseven",  50, "pistol", 20, 100 ) );
-    g_Guns.insertLast( Gun( "weapon_dualelites", "Dual Elites",     800, SLOT_PISTOL,  "ammo_dualelites", 20, "pistol", 30, 120 ) );
+    g_Guns.insertLast( Gun( "weapon_csglock18",  "Glock 18",        400, CAT_SIDE,  "ammo_csglock18",  20, "pistol", 20, 120 ) );
+    g_Guns.insertLast( Gun( "weapon_usp",        "USP .45",         500, CAT_SIDE,  "ammo_usp",        25, "pistol", 12, 100 ) );
+    g_Guns.insertLast( Gun( "weapon_p228",       "P228",            600, CAT_SIDE,  "ammo_p228",       50, "pistol", 13, 52 ) );
+    g_Guns.insertLast( Gun( "weapon_csdeagle",   "Desert Eagle",    650, CAT_SIDE,  "ammo_csdeagle",   40, "pistol", 7, 35 ) );
+    g_Guns.insertLast( Gun( "weapon_fiveseven",  "Five-Seven",      750, CAT_SIDE,  "ammo_fiveseven",  50, "pistol", 20, 100 ) );
+    g_Guns.insertLast( Gun( "weapon_dualelites", "Dual Elites",     800, CAT_SIDE,  "ammo_dualelites", 20, "pistol", 30, 120 ) );
     // shotguns
-    g_Guns.insertLast( Gun( "weapon_m3",         "M3 Super 90",    1700, SLOT_PRIMARY, "ammo_m3",         65, "shotgun", 8, 32 ) );
-    g_Guns.insertLast( Gun( "weapon_xm1014",     "XM1014",         3000, SLOT_PRIMARY, "ammo_xm1014",     65, "shotgun", 7, 32 ) );
+    g_Guns.insertLast( Gun( "weapon_m3",         "M3 Super 90",    1700, CAT_RIFLE, "ammo_m3",         65, "shotgun", 8, 32 ) );
+    g_Guns.insertLast( Gun( "weapon_xm1014",     "XM1014",         3000, CAT_RIFLE, "ammo_xm1014",     65, "shotgun", 7, 32 ) );
     // smgs
-    g_Guns.insertLast( Gun( "weapon_tmp",        "TMP",            1250, SLOT_PRIMARY, "ammo_tmp",        20, "smg", 30, 120 ) );
-    g_Guns.insertLast( Gun( "weapon_mac10",      "MAC-10",         1400, SLOT_PRIMARY, "ammo_mac10",      25, "smg", 30, 100 ) );
-    g_Guns.insertLast( Gun( "weapon_mp5navy",    "MP5 Navy",       1500, SLOT_PRIMARY, "ammo_mp5navy",    20, "smg", 30, 120 ) );
-    g_Guns.insertLast( Gun( "weapon_ump45",      "UMP45",          1700, SLOT_PRIMARY, "ammo_ump45",      25, "smg", 25, 100 ) );
-    g_Guns.insertLast( Gun( "weapon_p90",        "P90",            2350, SLOT_PRIMARY, "ammo_p90",        50, "smg", 50, 100 ) );
+    g_Guns.insertLast( Gun( "weapon_tmp",        "TMP",            1250, CAT_RIFLE, "ammo_tmp",        20, "smg", 30, 120 ) );
+    g_Guns.insertLast( Gun( "weapon_mac10",      "MAC-10",         1400, CAT_RIFLE, "ammo_mac10",      25, "smg", 30, 100 ) );
+    g_Guns.insertLast( Gun( "weapon_mp5navy",    "MP5 Navy",       1500, CAT_RIFLE, "ammo_mp5navy",    20, "smg", 30, 120 ) );
+    g_Guns.insertLast( Gun( "weapon_ump45",      "UMP45",          1700, CAT_RIFLE, "ammo_ump45",      25, "smg", 25, 100 ) );
+    g_Guns.insertLast( Gun( "weapon_p90",        "P90",            2350, CAT_RIFLE, "ammo_p90",        50, "smg", 50, 100 ) );
     // rifles
-    g_Guns.insertLast( Gun( "weapon_galil",      "Galil",          2000, SLOT_PRIMARY, "ammo_galil",      60, "rifle", 35, 90 ) );
-    g_Guns.insertLast( Gun( "weapon_famas",      "FAMAS",          2250, SLOT_PRIMARY, "ammo_famas",      60, "rifle", 25, 90 ) );
-    g_Guns.insertLast( Gun( "weapon_ak47",       "AK-47",          2500, SLOT_PRIMARY, "ammo_ak47",       80, "rifle", 30, 90 ) );
-    g_Guns.insertLast( Gun( "weapon_scout",      "Scout",          2750, SLOT_PRIMARY, "ammo_scout",      80, "rifle", 10, 90 ) );
-    g_Guns.insertLast( Gun( "weapon_m4a1",       "M4A1",           3100, SLOT_PRIMARY, "ammo_m4a1",       60, "rifle", 30, 90 ) );
-    g_Guns.insertLast( Gun( "weapon_aug",        "AUG",            3500, SLOT_PRIMARY, "ammo_aug",        60, "rifle", 30, 90 ) );
-    g_Guns.insertLast( Gun( "weapon_sg552",      "SG552",          3500, SLOT_PRIMARY, "ammo_sg552",      60, "rifle", 30, 90 ) );
-    g_Guns.insertLast( Gun( "weapon_sg550",      "SG550",          4200, SLOT_PRIMARY, "ammo_sg550",      60, "rifle", 30, 90 ) );
-    g_Guns.insertLast( Gun( "weapon_awp",        "AWP",            4750, SLOT_PRIMARY, "ammo_awp",       125, "rifle", 10, 30 ) );
-    g_Guns.insertLast( Gun( "weapon_g3sg1",      "G3SG1",          5000, SLOT_PRIMARY, "ammo_g3sg1",      80, "rifle", 20, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_galil",      "Galil",          2000, CAT_RIFLE, "ammo_galil",      60, "rifle", 35, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_famas",      "FAMAS",          2250, CAT_RIFLE, "ammo_famas",      60, "rifle", 25, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_ak47",       "AK-47",          2500, CAT_RIFLE, "ammo_ak47",       80, "rifle", 30, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_scout",      "Scout",          2750, CAT_RIFLE, "ammo_scout",      80, "rifle", 10, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_m4a1",       "M4A1",           3100, CAT_RIFLE, "ammo_m4a1",       60, "rifle", 30, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_aug",        "AUG",            3500, CAT_RIFLE, "ammo_aug",        60, "rifle", 30, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_sg552",      "SG552",          3500, CAT_RIFLE, "ammo_sg552",      60, "rifle", 30, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_sg550",      "SG550",          4200, CAT_RIFLE, "ammo_sg550",      60, "rifle", 30, 90 ) );
+    g_Guns.insertLast( Gun( "weapon_awp",        "AWP",            4750, CAT_RIFLE, "ammo_awp",       125, "rifle", 10, 30 ) );
+    g_Guns.insertLast( Gun( "weapon_g3sg1",      "G3SG1",          5000, CAT_RIFLE, "ammo_g3sg1",      80, "rifle", 20, 90 ) );
     // machine gun
-    g_Guns.insertLast( Gun( "weapon_csm249",     "M249",           5750, SLOT_PRIMARY, "ammo_csm249",     60, "mg", 100, 200 ) );
+    g_Guns.insertLast( Gun( "weapon_csm249",     "M249",           5750, CAT_RIFLE, "ammo_csm249",     60, "mg", 100, 200 ) );
     // equipment
-    g_Guns.insertLast( Gun( "weapon_hegrenade",  "HE Grenade",      300, SLOT_NONE,    "",                 0, "equip" ) );
-    g_Guns.insertLast( Gun( "kevlar",            "Kevlar (100 armor)", KEVLAR_PRICE, SLOT_NONE, "",       0, "equip" ) );
-    g_Guns.insertLast( Gun( "upg_clip",          "Upgrade held gun: magazine +20%  ($" + UPG_CLIP_PRICE + " x level)", UPG_CLIP_PRICE, SLOT_NONE, "", 0, "equip" ) );
-    g_Guns.insertLast( Gun( "upg_mag",           "Upgrade held gun: +2 spare mags  ($" + UPG_MAG_PRICE + " x level)",  UPG_MAG_PRICE,  SLOT_NONE, "", 0, "equip" ) );
+    g_Guns.insertLast( Gun( "weapon_hegrenade",  "HE Grenade",      300, CAT_NONE,    "",                 0, "equip" ) );
+    g_Guns.insertLast( Gun( "kevlar",            "Kevlar (100 armor)", KEVLAR_PRICE, CAT_NONE, "",       0, "equip" ) );
 }
 
 // mirrors cs16/cs16_register.as (which cannot be a second map_script because it defines MapInit)
@@ -224,7 +232,7 @@ void SetupCS16Weapons()
     RegisterAll();
 }
 
-string ItemText( Gun@ g ) { return ( g.cls == "upg_clip" || g.cls == "upg_mag" ) ? g.label : g.label + "  $" + g.price; }
+string ItemText( Gun@ g ) { return g.label + "  $" + g.price; }
 
 CTextMenu@ MakeGunMenu( const string& in title, const string& in cat )
 {
@@ -250,8 +258,7 @@ void BuildMenus()
     g_MenuMain.AddItem( "Sub-Machine Guns" );
     g_MenuMain.AddItem( "Rifles" );
     g_MenuMain.AddItem( "Machine Gun" );
-    g_MenuMain.AddItem( "Primary Ammo" );
-    g_MenuMain.AddItem( "Secondary Ammo" );
+    g_MenuMain.AddItem( "Ammo (one magazine)" );
     g_MenuMain.AddItem( "Equipment" );
     g_MenuMain.Register();
 
@@ -273,8 +280,7 @@ void MainMenuCallback( CTextMenu@ menu, CBasePlayer@ pPlayer, int iSlot, const C
     else if( c == "Sub-Machine Guns" ) g_MenuSmg.Open( 0, 0, pPlayer );
     else if( c == "Rifles" )           g_MenuRifle.Open( 0, 0, pPlayer );
     else if( c == "Machine Gun" )      g_MenuMg.Open( 0, 0, pPlayer );
-    else if( c == "Primary Ammo" )     BuyAmmo( pPlayer, SLOT_PRIMARY );
-    else if( c == "Secondary Ammo" )   BuyAmmo( pPlayer, SLOT_PISTOL );
+    else if( c == "Ammo (one magazine)" ) OpenAmmoMenu( pPlayer );
     else if( c == "Equipment" )        g_MenuEquip.Open( 0, 0, pPlayer );
 }
 
@@ -287,7 +293,13 @@ void GunMenuCallback( CTextMenu@ menu, CBasePlayer@ pPlayer, int iSlot, const CT
 
 // ------------------------------------------------------------------ economy
 
-string PlayerKey( CBasePlayer@ p ) { return g_EngineFuncs.GetPlayerAuthId( p.edict() ); }
+string PlayerKey( CBasePlayer@ p )
+{
+    string id = g_EngineFuncs.GetPlayerAuthId( p.edict() );
+    if( id.Length() > 8 && id.SubString( 0, 8 ) == "STEAM_0:" ) return id;
+    if( id.Length() > 8 && id.SubString( 0, 8 ) == "STEAM_1:" ) return id;
+    return "name:" + string( p.pev.netname );   // LAN / pending ids are shared by everyone
+}
 
 int GetMoney( CBasePlayer@ p )
 {
@@ -543,40 +555,37 @@ Gun@ ActiveGun( CBasePlayer@ p )
     CBaseEntity@ act = p.m_hActiveItem.GetEntity();
     if( act is null ) return null;
     Gun@ g = GunByClass( act.GetClassname() );
-    if( g is null || g.slot == SLOT_NONE ) return null;
+    if( g is null || g.slot == CAT_NONE ) return null;
     return g;
 }
-
-void BuyUpgrade( CBasePlayer@ p, bool clipUpgrade )
+// buying a gun you already own upgrades it: spare mags, then magazine size, alternating, UPG_MAX_LEVEL each
+void BuyUpgrade( CBasePlayer@ p, Gun@ g )
 {
-    Gun@ g = ActiveGun( p );
-    if( g is null )
+    int magLvl = MagLevel( p, g.cls );
+    int clipLvl = ClipLevel( p, g.cls );
+    bool doMag;
+    if( magLvl >= UPG_MAX_LEVEL && clipLvl >= UPG_MAX_LEVEL )
     {
-        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Hold the gun you want to upgrade" );
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + " is fully upgraded" );
         return;
     }
-    int lvl = clipUpgrade ? ClipLevel( p, g.cls ) : MagLevel( p, g.cls );
-    if( lvl >= UPG_MAX_LEVEL )
-    {
-        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + " is already at max level" );
-        return;
-    }
-    int price = ( clipUpgrade ? UPG_CLIP_PRICE : UPG_MAG_PRICE ) * ( lvl + 1 );
+    if( magLvl >= UPG_MAX_LEVEL ) doMag = false;
+    else if( clipLvl >= UPG_MAX_LEVEL ) doMag = true;
+    else doMag = ( magLvl <= clipLvl );
     int money = GetMoney( p );
-    if( money < price )
+    if( money < g.price )
     {
-        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Not enough money: level " + ( lvl + 1 ) + " costs $" + price );
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Upgrade costs $" + g.price + " (buy the same gun again)" );
         return;
     }
     string k = UpgKey( p, g.cls );
-    if( clipUpgrade ) g_ClipLvl[k] = lvl + 1; else g_MagLvl[k] = lvl + 1;
-    SetMoney( p, money - price );
-    if( clipUpgrade )
-        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + " magazine: " + ( g.clip + ClipBonus( p, g ) ) + " rounds (level " + ( lvl + 1 ) + ")  -$" + price );
+    if( doMag ) g_MagLvl[k] = magLvl + 1; else g_ClipLvl[k] = clipLvl + 1;
+    SetMoney( p, money - g.price );
+    if( doMag )
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + " upgraded: reserve " + CarryCap( p, g ) + " rounds (spare mags " + ( magLvl + 1 ) + "/" + UPG_MAX_LEVEL + ")  -$" + g.price );
     else
-        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + " reserve: " + CarryCap( p, g ) + " rounds (level " + ( lvl + 1 ) + ")  -$" + price );
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + " upgraded: magazine " + ( g.clip + ClipBonus( p, g ) ) + " rounds (size " + ( clipLvl + 1 ) + "/" + UPG_MAX_LEVEL + ")  -$" + g.price );
 }
-
 // bigger magazines: right after a full reload (clip == base) top the clip up from the reserve
 HookReturnCode OnPlayerPostThink( CBasePlayer@ p )
 {
@@ -604,22 +613,24 @@ void OpenBuyMenu( CBasePlayer@ p )
     g_MenuMain.Open( 0, 0, p );
 }
 
-Gun@ HeldGun( CBasePlayer@ p, GunSlot slot )
+Gun@ HeldGun( CBasePlayer@ p, int cat )
 {
     for( uint i = 0; i < g_Guns.length(); ++i )
     {
-        if( g_Guns[i].slot != slot ) continue;
+        if( g_Guns[i].slot != cat ) continue;
         if( p.HasNamedPlayerItem( g_Guns[i].cls ) !is null ) return g_Guns[i];
     }
     return null;
 }
-
 void BuyGun( CBasePlayer@ p, int idx )
 {
     if( !CanBuy( p ) ) return;
     Gun@ g = g_Guns[idx];
-    if( g.cls == "upg_clip" ) { BuyUpgrade( p, true );  return; }
-    if( g.cls == "upg_mag" )  { BuyUpgrade( p, false ); return; }
+    if( g.slot != CAT_NONE && p.HasNamedPlayerItem( g.cls ) !is null )
+    {
+        BuyUpgrade( p, g );
+        return;
+    }
     int money = GetMoney( p );
     if( money < g.price )
     {
@@ -637,39 +648,39 @@ void BuyGun( CBasePlayer@ p, int idx )
     }
     else
     {
-        if( g.slot != SLOT_NONE )
+        if( g.slot != CAT_NONE )
         {
-            if( p.HasNamedPlayerItem( g.cls ) !is null )
-            {
-                g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "You already have a " + g.label );
-                return;
-            }
             Gun@ old = HeldGun( p, g.slot );
             if( old !is null )
-                p.DropItem( old.cls );        // CS style: the old gun of that slot goes on the floor
+                p.DropItem( old.cls );        // CS style: the old gun of that category goes on the floor
         }
         p.GiveNamedItem( g.cls );
-        if( g.slot != SLOT_NONE )
+        if( g.slot != CAT_NONE )
             p.SelectItem( g.cls );
     }
     SetMoney( p, money - g.price );
     g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Bought " + g.label + " for $" + g.price );
 }
+// one magazine for the gun in that category: rounds x per-round price of its ammo type
+int AmmoUnitPrice( Gun@ g ) { return g.clip > 0 ? ( g.ammoPrice * AMMO_PRICE_MULT + g.clip - 1 ) / g.clip : 0; }
+int MagazineRounds( CBasePlayer@ p, Gun@ g ) { return g.clip + ClipBonus( p, g ); }
+int MagazinePrice( CBasePlayer@ p, Gun@ g ) { return MagazineRounds( p, g ) * AmmoUnitPrice( g ); }
 
-void BuyAmmo( CBasePlayer@ p, GunSlot slot )
+void BuyAmmo( CBasePlayer@ p, int cat )
 {
     if( !CanBuy( p ) ) return;
-    Gun@ g = HeldGun( p, slot );
+    Gun@ g = HeldGun( p, cat );
     if( g is null || g.ammo.Length() == 0 )
     {
-        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, slot == SLOT_PRIMARY ? "No primary weapon" : "No pistol" );
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "No gun in category " + cat );
         return;
     }
-    int price = g.ammoPrice * AMMO_PRICE_MULT;
+    int rounds = MagazineRounds( p, g );
+    int price = MagazinePrice( p, g );
     int money = GetMoney( p );
     if( money < price )
     {
-        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Not enough money: ammo costs $" + price );
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Not enough money: " + rounds + " x $" + AmmoUnitPrice( g ) + " = $" + price );
         return;
     }
     CBasePlayerWeapon@ w = cast<CBasePlayerWeapon@>( p.HasNamedPlayerItem( g.cls ) );
@@ -687,21 +698,54 @@ void BuyAmmo( CBasePlayer@ p, GunSlot slot )
             g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Reserve full (" + cap + ")" );
             return;
         }
-        int nv = cur + g.clip; if( nv > cap ) nv = cap;
+        int nv = cur + rounds; if( nv > cap ) nv = cap;
         p.m_rgAmmo( type, nv );
     }
     SetMoney( p, money - price );
-    g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + " ammo  -$" + price );
+    g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, g.label + ": " + rounds + " rounds x $" + AmmoUnitPrice( g ) + " = -$" + price );
 }
 
+dictionary g_AmmoMenuCat;   // item text -> category (rebuilt on every open)
+
+void AmmoMenuCallback( CTextMenu@ menu, CBasePlayer@ pPlayer, int iSlot, const CTextMenuItem@ pItem )
+{
+    if( pItem is null || pPlayer is null ) return;
+    if( !g_AmmoMenuCat.exists( pItem.m_szName ) ) return;
+    BuyAmmo( pPlayer, int( g_AmmoMenuCat[pItem.m_szName] ) );
+}
+
+void OpenAmmoMenu( CBasePlayer@ p )
+{
+    if( !CanBuy( p ) ) return;
+    CTextMenu@ m = CTextMenu( TextMenuPlayerSlotCallback( @AmmoMenuCallback ) );
+    m.SetTitle( "Ammo - one magazine   ($" + GetMoney( p ) + ")\n" );
+    int n = 0;
+    for( int cat = CAT_MIN; cat <= CAT_MAX; ++cat )
+    {
+        Gun@ g = HeldGun( p, cat );
+        if( g is null ) continue;
+        string txt = "[" + cat + "] " + g.label + "  " + MagazineRounds( p, g ) + " rds x $" + AmmoUnitPrice( g ) + " = $" + MagazinePrice( p, g );
+        g_AmmoMenuCat[txt] = cat;
+        m.AddItem( txt );
+        ++n;
+    }
+    if( n == 0 )
+    {
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "You have no guns to buy ammo for" );
+        return;
+    }
+    m.Register();
+    m.Open( 0, 0, p );
+}
 // one pistol + one primary: drop extras picked up from the floor (keeps the active one)
+// one gun per category: drop extras picked up from the floor (keeps the active one)
 void EnforceSlots( CBasePlayer@ p )
 {
-    for( int s = int( SLOT_PISTOL ); s <= int( SLOT_PRIMARY ); ++s )
+    for( int cat = CAT_MIN; cat <= CAT_MAX; ++cat )
     {
         array<Gun@> held;
         for( uint i = 0; i < g_Guns.length(); ++i )
-            if( int( g_Guns[i].slot ) == s && p.HasNamedPlayerItem( g_Guns[i].cls ) !is null )
+            if( g_Guns[i].slot == cat && p.HasNamedPlayerItem( g_Guns[i].cls ) !is null )
                 held.insertLast( g_Guns[i] );
         if( held.length() <= 1 ) continue;
 
@@ -716,11 +760,17 @@ void EnforceSlots( CBasePlayer@ p )
         }
     }
 }
-
 // console commands: .buy  .buyammo1 (primary)  .buyammo2 (pistol)
 void CmdBuy( const CCommand@ args )      { OpenBuyMenu( g_ConCommandSystem.GetCurrentPlayer() ); }
-void CmdBuyAmmo1( const CCommand@ args ) { CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer(); if( p !is null ) BuyAmmo( p, SLOT_PRIMARY ); }
-void CmdBuyAmmo2( const CCommand@ args ) { CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer(); if( p !is null ) BuyAmmo( p, SLOT_PISTOL ); }
+int PrimaryCategory( CBasePlayer@ p )
+{
+    if( HeldGun( p, CAT_RIFLE ) !is null ) return CAT_RIFLE;
+    if( HeldGun( p, CAT_SMG ) !is null )   return CAT_SMG;
+    if( HeldGun( p, CAT_MG ) !is null )    return CAT_MG;
+    return CAT_SIDE;
+}
+void CmdBuyAmmo1( const CCommand@ args ) { CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer(); if( p !is null ) BuyAmmo( p, PrimaryCategory( p ) ); }
+void CmdBuyAmmo2( const CCommand@ args ) { CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer(); if( p !is null ) BuyAmmo( p, CAT_SIDE ); }
 
 CClientCommand g_CmdBuy( "buy", "Open the CS buy menu (spawn zone only)", @CmdBuy );
 CClientCommand g_CmdBuyAmmo1( "buyammo1", "Buy primary weapon ammo", @CmdBuyAmmo1 );
@@ -737,8 +787,8 @@ HookReturnCode OnClientSay( SayParameters@ pParams )
         pParams.ShouldHide = true;
         OpenBuyMenu( p );
     }
-    else if( a == "!buyammo1" || a == "/buyammo1" ) { pParams.ShouldHide = true; BuyAmmo( p, SLOT_PRIMARY ); }
-    else if( a == "!buyammo2" || a == "/buyammo2" ) { pParams.ShouldHide = true; BuyAmmo( p, SLOT_PISTOL ); }
+    else if( a == "!buyammo1" || a == "/buyammo1" ) { pParams.ShouldHide = true; BuyAmmo( p, PrimaryCategory( p ) ); }
+    else if( a == "!buyammo2" || a == "/buyammo2" ) { pParams.ShouldHide = true; BuyAmmo( p, CAT_SIDE ); }
     else if( a == "!money" ) { pParams.ShouldHide = true; g_PlayerFuncs.ClientPrint( p, HUD_PRINTTALK, "[PVE] You have $" + GetMoney( p ) + "\n" ); }
     return HOOK_CONTINUE;
 }

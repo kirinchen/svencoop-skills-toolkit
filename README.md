@@ -56,10 +56,12 @@ wad copied over and its CS-only entities swapped out.
 - monster count scales with player count; clearing a wave heals everyone and pays a bonus
 - monsters that never find a player are pushed onto the nearest one
 - Counter-Strike economy: knife + USP + $800 at start, $300 per kill, a bonus per cleared wave
-- buy from the Arms Dealer NPCs in spawn: walk up and press E (no binds needed); one pistol + one primary (buying into a taken slot drops the old gun)
+- buy from the Arms Dealer NPC in spawn: walk up and press E (no binds needed)
+- one gun per category: [2] pistol or shotgun, [3] SMG, [4] rifle/sniper, [5] machine gun (buying into a taken category drops the old gun; picking up a second one drops it too)
+- buying a gun you already own upgrades it (same price): +2 spare mags of reserve, then magazine +20%, alternating, 2 levels each
 - `bind b ".buy"`, `bind , ".buyammo1"` (primary ammo), `bind . ".buyammo2"` (pistol ammo); or say `buy` in chat
 - guns and prices are CS 1.6's (AK-47 $2500, M4A1 $3100, AWP $4750, AUG $3500, ...) via KernCore's weapon pack; ammo and Kevlar cost 4x CS
-- Equipment menu upgrades for the gun you are holding, 3 levels each, priced separately: magazine +20% per level ($1000 x level), +2 spare magazines of reserve per level ($800 x level)
+- ammo is bought per magazine from the Ammo menu (pick the category): price = rounds in the magazine x per-round price of that ammo type (CS magazine price x4 / rounds); an upgraded, bigger magazine costs proportionally more
 
 Tune constants at the top of `maps/dust2_pve/dust2_pve.as` or the wave table in `BuildWaves()`,
 rerun `cs2sven.py` (the BSP is only rewritten when it actually changes, so the node graph cache survives).

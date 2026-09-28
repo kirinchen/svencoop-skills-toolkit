@@ -66,6 +66,8 @@
 - `Hooks::Player::PlayerTakeDamage(DamageInfo@)` works for scaling monster damage
   (`info.pAttacker.IsMonster()`, `info.flDamage *= mult`). `Hooks::Player::PlayerKilled(CBasePlayer@,
   CBaseEntity@, int)` + `RemoveAllItems(false, false)` + removing nearby `weaponbox` = no guns on death.
+- `GetPlayerAuthId` returns `STEAM_ID_LAN` for everyone on `sv_lan 1` servers: never key per-player
+  state by it alone (everyone shared one wallet). Fall back to the player name.
 - `pev.netname` is `string_t`: wrap in `string(...)` before concatenating.
 - Servers cannot push key binds (`cl_filterstuffcmd 1` is the client default): binds go in the
   client's autoexec.cfg / MOTD.

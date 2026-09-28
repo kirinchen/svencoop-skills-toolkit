@@ -447,6 +447,40 @@ Vector FloorAt( const Vector& in p )
     return tr.flFraction < 1.0f ? tr.vecEndPos : p;
 }
 
+// is there room for a human-sized prop standing at this point (origin 36 above the floor)?
+bool SpotFree( const Vector& in feet )
+{
+    TraceResult tr;
+    Vector o = feet + Vector( 0, 0, 37 );
+    g_Utility.TraceHull( o, o, ignore_monsters, human_hull, null, tr );
+    return tr.fStartSolid == 0 && tr.fAllSolid == 0;
+}
+
+// a free spot near a spawn point: in front first, then shorter, sideways, behind
+bool FindPropSpot( const Vector& in spawn, float yawDeg, Vector& out pos )
+{
+    float yaw = yawDeg * 0.0174533f;
+    Vector fwd( cos( yaw ), sin( yaw ), 0 );
+    Vector right( sin( yaw ), -cos( yaw ), 0 );
+    array<Vector> dirs = { fwd, right, right * -1.0f, fwd * -1.0f };
+    array<float> dists = { 72.0f, 48.0f, 32.0f };
+    for( uint di = 0; di < dists.length(); ++di )
+    {
+        for( uint k = 0; k < dirs.length(); ++k )
+        {
+            Vector cand = spawn + dirs[k] * dists[di];
+            TraceResult tr;
+            g_Utility.TraceLine( cand + Vector( 0, 0, 16 ), cand - Vector( 0, 0, 256 ), ignore_monsters, null, tr );
+            if( tr.flFraction >= 1.0f ) continue;            // no floor below
+            if( tr.fStartSolid == 1 ) continue;                // started inside a wall
+            Vector feet = tr.vecEndPos;
+            if( !SpotFree( feet ) ) continue;
+            pos = feet;
+            return true;
+        }
+    }
+    return false;
+}
 // a non-AI display NPC (monster_generic): never moves, never fights, cannot die
 CBaseEntity@ SpawnProp( const Vector& in pos, float yaw, const string& in model, const string& in name, const string& in targetname )
 {
@@ -489,6 +523,8 @@ void SpawnGlow( const Vector& in pos, const string& in color )
 }
 
 // Arms Dealer on the spawn point nearest the centre, Next Wave console on the one farthest from him
+// Arms Dealer near the spawn point closest to the centre, Next Wave console near the one farthest
+// from him; both only on spots that are actually free (spawn points can face a wall)
 void SpawnBuyStations( const array<Vector>& in spawns, const array<float>& in yaws )
 {
     if( spawns.length() == 0 ) return;
@@ -496,43 +532,54 @@ void SpawnBuyStations( const array<Vector>& in spawns, const array<float>& in ya
     for( uint i = 0; i < spawns.length(); ++i ) c = c + spawns[i];
     c = c * ( 1.0f / float( spawns.length() ) );
 
-    int dealerIdx = 0; float bd = 999999.0f;
-    for( uint i = 0; i < spawns.length(); ++i )
-    {
-        float d = ( spawns[i] - c ).Length();
-        if( d < bd ) { bd = d; dealerIdx = int( i ); }
-    }
-    int deviceIdx = -1; float far = -1.0f;
-    for( uint i = 0; i < spawns.length(); ++i )
-    {
-        if( int( i ) == dealerIdx ) continue;
-        float d = ( spawns[i] - spawns[dealerIdx] ).Length();
-        if( d > far ) { far = d; deviceIdx = int( i ); }
-    }
+    // dealer: candidates by distance to the centre, first one with a free spot wins
+    array<int> order;
+    for( uint i = 0; i < spawns.length(); ++i ) order.insertLast( int( i ) );
+    for( uint a = 0; a < order.length(); ++a )
+        for( uint b = a + 1; b < order.length(); ++b )
+            if( ( spawns[order[b]] - c ).Length() < ( spawns[order[a]] - c ).Length() )
+            { int t = order[a]; order[a] = order[b]; order[b] = t; }
 
-    // 72 units in front of the spawn point so nobody spawns inside the prop; prop faces the spawn
-    float yaw = yaws[dealerIdx] * 0.0174533f;
-    Vector pos = FloorAt( spawns[dealerIdx] + Vector( cos( yaw ), sin( yaw ), 0 ) * 72.0f );
-    if( SpawnProp( pos, yaws[dealerIdx] + 180.0f, STATION_MODEL, STATION_NAME, "pve_buystation" ) !is null )
+    int dealerIdx = -1;
+    Vector pos;
+    for( uint k = 0; k < order.length(); ++k )
     {
-        g_Stations.insertLast( pos );
-        SpawnGlow( pos + Vector( 0, 0, 96 ), "255 200 60" );
-    }
-
-    if( deviceIdx >= 0 )
-    {
-        yaw = yaws[deviceIdx] * 0.0174533f;
-        pos = FloorAt( spawns[deviceIdx] + Vector( cos( yaw ), sin( yaw ), 0 ) * 72.0f );
-        if( SpawnProp( pos, yaws[deviceIdx] + 180.0f, DEVICE_MODEL, DEVICE_NAME, "pve_device" ) !is null )
+        if( FindPropSpot( spawns[order[k]], yaws[order[k]], pos ) )
         {
-            g_DevicePos = pos;
-            g_HasDevice = true;
-            SpawnGlow( pos + Vector( 0, 0, 72 ), "80 200 255" );
+            dealerIdx = order[k];
+            if( SpawnProp( pos, yaws[dealerIdx] + 180.0f, STATION_MODEL, STATION_NAME, "pve_buystation" ) !is null )
+            {
+                g_Stations.insertLast( pos );
+                SpawnGlow( pos + Vector( 0, 0, 96 ), "255 200 60" );
+            }
+            break;
+        }
+    }
+
+    // console: candidates by distance from the dealer (farthest first), first free spot wins
+    if( dealerIdx >= 0 )
+    {
+        for( uint a = 0; a < order.length(); ++a )
+            for( uint b = a + 1; b < order.length(); ++b )
+                if( ( spawns[order[b]] - spawns[dealerIdx] ).Length() > ( spawns[order[a]] - spawns[dealerIdx] ).Length() )
+                { int t = order[a]; order[a] = order[b]; order[b] = t; }
+        for( uint k = 0; k < order.length(); ++k )
+        {
+            int i = order[k];
+            if( i == dealerIdx ) continue;
+            if( !FindPropSpot( spawns[i], yaws[i], pos ) ) continue;
+            if( ( pos - g_Stations[0] ).Length() < 96.0f ) continue;   // not on top of the dealer
+            if( SpawnProp( pos, yaws[i] + 180.0f, DEVICE_MODEL, DEVICE_NAME, "pve_device" ) !is null )
+            {
+                g_DevicePos = pos;
+                g_HasDevice = true;
+                SpawnGlow( pos + Vector( 0, 0, 72 ), "80 200 255" );
+            }
+            break;
         }
     }
     g_Game.AlertMessage( at_console, "[cs_pve] buy stations: %1, device: %2\n", g_Stations.length(), g_HasDevice ? 1 : 0 );
 }
-
 dictionary g_ClipLvl;   // "steamid|weapon_x" -> level
 dictionary g_MagLvl;
 

@@ -258,7 +258,7 @@ void BuildMenus()
     g_MenuMain.AddItem( "Sub-Machine Guns" );
     g_MenuMain.AddItem( "Rifles" );
     g_MenuMain.AddItem( "Machine Gun" );
-    g_MenuMain.AddItem( "Ammo (one magazine)" );
+    g_MenuMain.AddItem( "Ammo: 1 magazine for the gun in hand" );
     g_MenuMain.AddItem( "Equipment" );
     g_MenuMain.Register();
 
@@ -280,7 +280,7 @@ void MainMenuCallback( CTextMenu@ menu, CBasePlayer@ pPlayer, int iSlot, const C
     else if( c == "Sub-Machine Guns" ) g_MenuSmg.Open( 0, 0, pPlayer );
     else if( c == "Rifles" )           g_MenuRifle.Open( 0, 0, pPlayer );
     else if( c == "Machine Gun" )      g_MenuMg.Open( 0, 0, pPlayer );
-    else if( c == "Ammo (one magazine)" ) OpenAmmoMenu( pPlayer );
+    else if( c == "Ammo: 1 magazine for the gun in hand" ) BuyAmmoHeld( pPlayer );
     else if( c == "Equipment" )        g_MenuEquip.Open( 0, 0, pPlayer );
 }
 
@@ -774,6 +774,13 @@ void AmmoMenuCallback( CTextMenu@ menu, CBasePlayer@ pPlayer, int iSlot, const C
     BuyAmmo( pPlayer, int( g_AmmoMenuCat[pItem.m_szName] ) );
 }
 
+// one magazine for the gun in hand (knife out: the primary, else the side arm)
+void BuyAmmoHeld( CBasePlayer@ p )
+{
+    Gun@ g = ActiveGun( p );
+    BuyAmmo( p, g !is null ? g.slot : PrimaryCategory( p ) );
+}
+
 void OpenAmmoMenu( CBasePlayer@ p )
 {
     if( !CanBuy( p ) ) return;
@@ -836,7 +843,7 @@ int PrimaryCategory( CBasePlayer@ p )
     if( HeldGun( p, CAT_MG ) !is null )    return CAT_MG;
     return CAT_SIDE;
 }
-void CmdBuyAmmo1( const CCommand@ args ) { CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer(); if( p !is null ) BuyAmmo( p, PrimaryCategory( p ) ); }
+void CmdBuyAmmo1( const CCommand@ args ) { CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer(); if( p !is null ) BuyAmmoHeld( p ); }
 void CmdBuyAmmo2( const CCommand@ args ) { CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer(); if( p !is null ) BuyAmmo( p, CAT_SIDE ); }
 
 CClientCommand g_CmdBuy( "buy", "Open the CS buy menu (spawn zone only)", @CmdBuy );
@@ -854,7 +861,8 @@ HookReturnCode OnClientSay( SayParameters@ pParams )
         pParams.ShouldHide = true;
         OpenBuyMenu( p );
     }
-    else if( a == "!buyammo1" || a == "/buyammo1" ) { pParams.ShouldHide = true; BuyAmmo( p, PrimaryCategory( p ) ); }
+    else if( a == "!buyammo1" || a == "/buyammo1" ) { pParams.ShouldHide = true; BuyAmmoHeld( p ); }
+    else if( a == "!ammo" ) { pParams.ShouldHide = true; OpenAmmoMenu( p ); }
     else if( a == "!buyammo2" || a == "/buyammo2" ) { pParams.ShouldHide = true; BuyAmmo( p, CAT_SIDE ); }
     else if( a == "!money" ) { pParams.ShouldHide = true; g_PlayerFuncs.ClientPrint( p, HUD_PRINTTALK, "[PVE] You have $" + GetMoney( p ) + "\n" ); }
     return HOOK_CONTINUE;

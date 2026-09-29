@@ -61,7 +61,7 @@ wad copied over and its CS-only entities swapped out.
 - buying a gun you already own upgrades it (same price): +2 spare mags of reserve, then magazine +20%, alternating, 5 levels each
 - `bind b ".buy"`, `bind , ".buyammo1"` (primary ammo), `bind . ".buyammo2"` (pistol ammo); or say `buy` in chat
 - guns and prices are CS 1.6's (AK-47 $2500, M4A1 $3100, AWP $4750, AUG $3500, ...) via KernCore's weapon pack; ammo and Kevlar cost 4x CS
-- ammo is bought per magazine from the Ammo menu (pick the category): price = rounds in the magazine x per-round price of that ammo type (CS magazine price x4 / rounds); an upgraded, bigger magazine costs proportionally more
+- ammo: menu item 6 buys one magazine for every gun you carry in one bill (chat `!ammo` opens the per-gun list); per magazine price = rounds in the magazine x per-round price of that ammo type (CS magazine price x4 / rounds); an upgraded, bigger magazine costs proportionally more
 
 Tune constants at the top of `maps/dust2_pve/dust2_pve.as` or the wave table in `BuildWaves()`,
 rerun `cs2sven.py` (the BSP is only rewritten when it actually changes, so the node graph cache survives).

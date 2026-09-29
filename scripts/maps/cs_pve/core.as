@@ -580,6 +580,7 @@ void SpawnBuyStations( const array<Vector>& in spawns, const array<float>& in ya
     }
     g_Game.AlertMessage( at_console, "[cs_pve] buy stations: %1, device: %2\n", g_Stations.length(), g_HasDevice ? 1 : 0 );
 }
+dictionary g_LastBought; // player key -> classname of the gun bought last (kept when categories collide)
 dictionary g_ClipLvl;   // "steamid|weapon_x" -> level
 dictionary g_MagLvl;
 
@@ -588,6 +589,15 @@ int ClipLevel( CBasePlayer@ p, const string& in cls ) { string k = UpgKey( p, cl
 int MagLevel( CBasePlayer@ p, const string& in cls )  { string k = UpgKey( p, cls ); return g_MagLvl.exists( k ) ? int( g_MagLvl[k] ) : 0; }
 int ClipBonus( CBasePlayer@ p, Gun@ g ) { return int( float( g.clip ) * UPG_CLIP_STEP * float( ClipLevel( p, g.cls ) ) + 0.999f ); }
 int CarryCap( CBasePlayer@ p, Gun@ g )  { return g.carry + UPG_MAG_STEP * MagLevel( p, g.cls ) * g.clip; }
+
+// remove a gun from the player for good (no drop: dropped guns get re-picked-up at the dealer's feet)
+void TakeAway( CBasePlayer@ p, const string& in cls )
+{
+    CBasePlayerItem@ item = p.HasNamedPlayerItem( cls );
+    if( item is null ) return;
+    p.RemovePlayerItem( item );
+    g_EntityFuncs.Remove( item );
+}
 
 Gun@ GunByClass( const string& in cls )
 {
@@ -699,11 +709,14 @@ void BuyGun( CBasePlayer@ p, int idx )
         {
             Gun@ old = HeldGun( p, g.slot );
             if( old !is null )
-                p.DropItem( old.cls );        // CS style: the old gun of that category goes on the floor
+                TakeAway( p, old.cls );       // the old gun of that category is gone (no refund)
         }
         p.GiveNamedItem( g.cls );
         if( g.slot != CAT_NONE )
+        {
+            g_LastBought[PlayerKey( p )] = g.cls;
             p.SelectItem( g.cls );
+        }
     }
     SetMoney( p, money - g.price );
     g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Bought " + g.label + " for $" + g.price );
@@ -786,8 +799,17 @@ void OpenAmmoMenu( CBasePlayer@ p )
 }
 // one pistol + one primary: drop extras picked up from the floor (keeps the active one)
 // one gun per category: drop extras picked up from the floor (keeps the active one)
+// one gun per category: extras (picked up from the floor) are removed; keeps the gun bought last,
+// else the active one, else the last in the table
 void EnforceSlots( CBasePlayer@ p )
 {
+    string lastBought = "";
+    string key = PlayerKey( p );
+    if( g_LastBought.exists( key ) ) lastBought = string( g_LastBought[key] );
+    string active = "";
+    CBaseEntity@ act = p.m_hActiveItem.GetEntity();
+    if( act !is null ) active = act.GetClassname();
+
     for( int cat = CAT_MIN; cat <= CAT_MAX; ++cat )
     {
         array<Gun@> held;
@@ -796,18 +818,16 @@ void EnforceSlots( CBasePlayer@ p )
                 held.insertLast( g_Guns[i] );
         if( held.length() <= 1 ) continue;
 
-        string active = "";
-        CBaseEntity@ act = p.m_hActiveItem.GetEntity();
-        if( act !is null ) active = act.GetClassname();
-        bool keptOne = false;
+        string keep = "";
+        for( uint i = 0; i < held.length(); ++i ) if( held[i].cls == lastBought ) keep = lastBought;
+        if( keep.Length() == 0 )
+            for( uint i = 0; i < held.length(); ++i ) if( held[i].cls == active ) keep = active;
+        if( keep.Length() == 0 ) keep = held[held.length() - 1].cls;
+
         for( uint i = 0; i < held.length(); ++i )
-        {
-            if( !keptOne && ( held[i].cls == active || i == held.length() - 1 ) ) { keptOne = true; continue; }
-            p.DropItem( held[i].cls );
-        }
+            if( held[i].cls != keep ) TakeAway( p, held[i].cls );
     }
-}
-// console commands: .buy  .buyammo1 (primary)  .buyammo2 (pistol)
+}// console commands: .buy  .buyammo1 (primary)  .buyammo2 (pistol)
 void CmdBuy( const CCommand@ args )      { OpenBuyMenu( g_ConCommandSystem.GetCurrentPlayer() ); }
 int PrimaryCategory( CBasePlayer@ p )
 {

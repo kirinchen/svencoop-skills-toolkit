@@ -258,7 +258,7 @@ void BuildMenus()
     g_MenuMain.AddItem( "Sub-Machine Guns" );
     g_MenuMain.AddItem( "Rifles" );
     g_MenuMain.AddItem( "Machine Gun" );
-    g_MenuMain.AddItem( "Ammo: 1 magazine for the gun in hand" );
+    g_MenuMain.AddItem( "Ammo: 1 magazine for every gun" );
     g_MenuMain.AddItem( "Equipment" );
     g_MenuMain.Register();
 
@@ -280,7 +280,7 @@ void MainMenuCallback( CTextMenu@ menu, CBasePlayer@ pPlayer, int iSlot, const C
     else if( c == "Sub-Machine Guns" ) g_MenuSmg.Open( 0, 0, pPlayer );
     else if( c == "Rifles" )           g_MenuRifle.Open( 0, 0, pPlayer );
     else if( c == "Machine Gun" )      g_MenuMg.Open( 0, 0, pPlayer );
-    else if( c == "Ammo: 1 magazine for the gun in hand" ) BuyAmmoHeld( pPlayer );
+    else if( c == "Ammo: 1 magazine for every gun" ) BuyAmmoAll( pPlayer );
     else if( c == "Equipment" )        g_MenuEquip.Open( 0, 0, pPlayer );
 }
 
@@ -775,12 +775,40 @@ void AmmoMenuCallback( CTextMenu@ menu, CBasePlayer@ pPlayer, int iSlot, const C
 }
 
 // one magazine for the gun in hand (knife out: the primary, else the side arm)
-void BuyAmmoHeld( CBasePlayer@ p )
+// one magazine for every gun the player carries, one bill; big guns first when money runs short
+void BuyAmmoAll( CBasePlayer@ p )
 {
-    Gun@ g = ActiveGun( p );
-    BuyAmmo( p, g !is null ? g.slot : PrimaryCategory( p ) );
+    if( !CanBuy( p ) ) return;
+    int spent = 0, bought = 0, skipped = 0;
+    string summary = "";
+    for( int cat = CAT_MAX; cat >= CAT_MIN; --cat )        // MG, rifle, SMG, then side arm
+    {
+        Gun@ g = HeldGun( p, cat );
+        if( g is null || g.ammo.Length() == 0 || g.clip <= 0 ) continue;
+        CBasePlayerWeapon@ w = cast<CBasePlayerWeapon@>( p.HasNamedPlayerItem( g.cls ) );
+        if( w is null || w.m_iPrimaryAmmoType < 0 ) continue;
+        int rounds = MagazineRounds( p, g );
+        int price = MagazinePrice( p, g );
+        int type = w.m_iPrimaryAmmoType;
+        int cur = p.m_rgAmmo( type );
+        int cap = CarryCap( p, g );
+        if( cur >= cap ) { ++skipped; continue; }              // reserve full
+        if( GetMoney( p ) < price ) { ++skipped; continue; }   // cannot afford this one
+        int nv = cur + rounds; if( nv > cap ) nv = cap;
+        p.m_rgAmmo( type, nv );
+        SetMoney( p, GetMoney( p ) - price );
+        spent += price; ++bought;
+        summary += ( summary.Length() > 0 ? ", " : "" ) + g.label + " +" + rounds + " ($" + price + ")";
+    }
+    if( bought == 0 )
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, skipped > 0 ? "Ammo: reserves full or not enough money" : "You have no guns to buy ammo for" );
+    else
+    {
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTCENTER, "Ammo: " + bought + " magazine(s), -$" + spent );
+        g_PlayerFuncs.ClientPrint( p, HUD_PRINTTALK, "[PVE] Ammo: " + summary + ( skipped > 0 ? "  (" + skipped + " skipped: full / no money)" : "" ) + "
+" );
+    }
 }
-
 void OpenAmmoMenu( CBasePlayer@ p )
 {
     if( !CanBuy( p ) ) return;
@@ -843,7 +871,7 @@ int PrimaryCategory( CBasePlayer@ p )
     if( HeldGun( p, CAT_MG ) !is null )    return CAT_MG;
     return CAT_SIDE;
 }
-void CmdBuyAmmo1( const CCommand@ args ) { CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer(); if( p !is null ) BuyAmmoHeld( p ); }
+void CmdBuyAmmo1( const CCommand@ args ) { CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer(); if( p !is null ) BuyAmmoAll( p ); }
 void CmdBuyAmmo2( const CCommand@ args ) { CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer(); if( p !is null ) BuyAmmo( p, CAT_SIDE ); }
 
 CClientCommand g_CmdBuy( "buy", "Open the CS buy menu (spawn zone only)", @CmdBuy );
@@ -861,7 +889,7 @@ HookReturnCode OnClientSay( SayParameters@ pParams )
         pParams.ShouldHide = true;
         OpenBuyMenu( p );
     }
-    else if( a == "!buyammo1" || a == "/buyammo1" ) { pParams.ShouldHide = true; BuyAmmoHeld( p ); }
+    else if( a == "!buyammo1" || a == "/buyammo1" ) { pParams.ShouldHide = true; BuyAmmoAll( p ); }
     else if( a == "!ammo" ) { pParams.ShouldHide = true; OpenAmmoMenu( p ); }
     else if( a == "!buyammo2" || a == "/buyammo2" ) { pParams.ShouldHide = true; BuyAmmo( p, CAT_SIDE ); }
     else if( a == "!money" ) { pParams.ShouldHide = true; g_PlayerFuncs.ClientPrint( p, HUD_PRINTTALK, "[PVE] You have $" + GetMoney( p ) + "\n" ); }

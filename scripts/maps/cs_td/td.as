@@ -1080,6 +1080,10 @@ bool TdClientSay( SayParameters@ pParams )
         {
             Vector spot;
             to = FindPropSpot( g_Stations[0], 0.0f, spot ) ? spot + Vector( 0, 0, 37 ) : g_Stations[0] + Vector( 0, 0, 80 );
+            Vector look = g_Stations[0] - to;
+            p.pev.angles = Vector( 5, Math.VecToYaw( look ), 0 );
+            p.pev.v_angle = p.pev.angles;
+            p.pev.fixangle = FAM_FORCEVIEWANGLES;
         }
         else if( w == "SPAWN" )
         {
@@ -1127,6 +1131,44 @@ bool TdClientSay( SayParameters@ pParams )
     }
     return false;
 }
+
+// ------------------------------------------------------------------ navigation aids for automated play (no gameplay effect)
+// .tdpos prints your position; .tdface X Y turns you toward a point (yaw only)
+
+void CmdTdPos( const CCommand@ args )
+{
+    CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer();
+    if( p is null ) return;
+    string mines = "";
+    for( uint i = 0; i < g_Mines.length(); ++i )
+    {
+        CBaseEntity@ m = g_Mines[i].GetEntity();
+        mines += " " + ( MineAlive( m ) ? int( m.pev.health ) : 0 ) + "/" + ( MineAlive( m ) ? AliveMiners( i ) : 0 );
+    }
+    bool hasPrimary = false;
+    for( uint k = 0; k < g_TowerGuns.length(); ++k )
+    {
+        Gun@ g = GunByClass( g_TowerGuns[k].cls );
+        if( g !is null && g.slot != CAT_SIDE && p.HasNamedPlayerItem( g.cls ) !is null ) hasPrimary = true;
+    }
+    g_PlayerFuncs.ClientPrint( p, HUD_PRINTCONSOLE, "[tdpos] " + int( p.pev.origin.x ) + " " + int( p.pev.origin.y ) + " " + int( p.pev.origin.z )
+        + " alive " + ( p.IsAlive() ? 1 : 0 ) + " money " + GetMoney( p ) + " wave " + ( g_WaveIdx + 1 ) + " state " + int( g_State )
+        + " primary " + ( hasPrimary ? 1 : 0 ) + " mines" + mines + "\n" );
+}
+
+void CmdTdFace( const CCommand@ args )
+{
+    CBasePlayer@ p = g_ConCommandSystem.GetCurrentPlayer();
+    if( p is null || args.ArgC() < 3 ) return;
+    Vector to( atof( args.Arg( 1 ) ), atof( args.Arg( 2 ) ), p.pev.origin.z );
+    float pitch = args.ArgC() > 3 ? atof( args.Arg( 3 ) ) : 0.0f;
+    p.pev.angles = Vector( pitch, Math.VecToYaw( to - p.pev.origin ), 0 );
+    p.pev.v_angle = p.pev.angles;
+    p.pev.fixangle = FAM_FORCEVIEWANGLES;
+}
+
+CClientCommand g_CmdTdPos( "tdpos", "print your position", @CmdTdPos );
+CClientCommand g_CmdTdFace( "tdface", "turn toward X Y [pitch]", @CmdTdFace );
 
 // ------------------------------------------------------------------ lifecycle (called from core)
 

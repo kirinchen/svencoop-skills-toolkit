@@ -1,0 +1,14 @@
+de_dust2 TD - Gold Mine Defence (CS economy)
+
+Two gold mines stand on bomb sites A and B (2000 HP each).
+Every standing mine pays everyone $10 per second. Money cap $1,000,000.
+Every monster goes for a gold mine; anyone it meets on the way gets hit too.
+Both mines destroyed = defeat. Clear wave 15 (the twin gargantuas) = victory.
+
+TOWERS
+- Drop a gun (G): it lands and grows into a tower that fires THAT gun.
+- The gun is gone; a destroyed tower is gone. No price, no limit.
+
+BUYING (Counter-Strike rules)
+- Walk up to the Arms Dealer in spawn and press E to buy.
+- Buy the same gun again to upgrade it (spare mags, then magazine size).

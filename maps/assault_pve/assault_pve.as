@@ -3,9 +3,10 @@
  * Generic logic lives in scripts/maps/cs_pve/core.as; this file only defines the waves.
  */
 #include "cs_pve/core"
+#include "cs_pve/turret"
 
-void MapInit()     { PveMapInit(); }
-void MapActivate() { PveMapActivate(); }
+void MapInit()     { PveMapInit(); TurretMapInit(); }
+void MapActivate() { PveMapActivate(); TurretMapActivate(); }
 
 void BuildWaves()
 {

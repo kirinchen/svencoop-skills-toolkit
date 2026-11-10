@@ -5,6 +5,7 @@
  * - every monster's goal is a gold mine; players / towers / NPCs it meets on the way get attacked too
  * - drop a CS gun (G) -> it becomes a tower that fires THAT gun (its damage, fire rate, pellets,
  *   magazine, sound); the gun is gone, a destroyed tower is gone. No price, no limit.
+ *   Looks: the gun's p_ (held) model lying flat on a small sandbag nest, turning to its target.
  *   Server variable td_towers 0 turns towers off.
  * - lose = both mines destroyed (no team lives); win = the last wave cleared
  * - gold miners: 1 per mine at the start, hire more at the Arms Dealer (MINER_PRICE, max MINER_MAX
@@ -14,7 +15,7 @@
  *   and refills them; monsters can kill him
  *
  * Test cheats (sv_cheats 1 only; not for real play): !tdhorde N [class], !tdmoney, !tdskip,
- * !tdgo A|B|spawn, !tdhurt A|B dmg
+ * !tdgo A|B|spawn, !tdhurt A|B dmg, !tdempty, !tdbuild [weapon_x], !tdcam [dist] [angle] [height]
  */
 
 const int    MINE_HP          = 2000;
@@ -33,11 +34,16 @@ const int    CARRIER_PRICE    = 1000;
 const string CARRIER_CLASS    = "monster_scientist";
 const float  CARRIER_REACH    = 110.0f;
 
-const string TOWER_BASE_MODEL = "models/mil_crate.mdl";
+const string TOWER_BASE_MODEL = "models/sandbags.mdl";   // a small sandbag nest under the gun
+const float  TOWER_BASE_SCALE = 0.5f;                   // sandbags.mdl is 132x58x50 -> 66x29x25
 const int    TOWER_HP        = 400;
 const float  TOWER_RANGE      = 1400.0f;
 const float  TOWER_RELOAD     = 2.5f;
-const float  TOWER_GUN_HEIGHT = 44.0f;   // gun above the floor
+const float  TOWER_GUN_HEIGHT = 30.0f;   // gun (and muzzle) above the floor: resting on the sandbags
+const float  TOWER_GUN_SCALE  = 1.6f;
+// CS p_ models are posed upright (barrel along +z) and off-centre around the player's hand.
+// Centre of that pose, measured from the .mdl (p_ak47 / m3 / usp / awp / m249 all within ~1.5 units).
+const Vector P_MODEL_CENTER = Vector( 7.5f, -9.5f, 29.0f );
 
 CCVar g_TdTowers( "td_towers", 1, "1 = a dropped gun grows into a tower, 0 = towers off", ConCommandFlag::AdminOnly );
 
@@ -50,39 +56,39 @@ class TowerGun
     float rate;     // seconds between shots
     int pellets;
     string snd;
-    string wmodel;
+    string gunmodel;
     TowerGun( const string& in c, int d, float r, int p, const string& in s, const string& in w )
-    { cls = c; dmg = d; rate = r; pellets = p; snd = s; wmodel = w; }
+    { cls = c; dmg = d; rate = r; pellets = p; snd = s; gunmodel = w; }
 }
 
 array<TowerGun@> g_TowerGuns;
 
 void BuildTowerGuns()
 {
-    g_TowerGuns.insertLast( TowerGun( "weapon_csglock18",  CS16_GLOCK18::DAMAGE, CS16_GLOCK18::RPM_SINGLE, 1, CS16_GLOCK18::SHOOT_S, CS16_GLOCK18::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_usp",        CS16_USP::DAMAGE,     CS16_USP::RPM,     1, CS16_USP::SHOOT_S,     CS16_USP::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_p228",       CS16_P228::DAMAGE,    CS16_P228::RPM,    1, CS16_P228::SHOOT_S,    CS16_P228::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_csdeagle",   CS16_DEAGLE::DAMAGE,  CS16_DEAGLE::RPM,  1, CS16_DEAGLE::SHOOT_S,  CS16_DEAGLE::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_fiveseven",  CS16_57::DAMAGE,      CS16_57::RPM,      1, CS16_57::SHOOT_S,      CS16_57::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_dualelites", CS16_ELITES::DAMAGE,  CS16_ELITES::RPM,  1, CS16_ELITES::SHOOT_S,  CS16_ELITES::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_m3",         CS16_M3::DAMAGE,      CS16_M3::RPM_PUMP, CS16_M3::PELLETS, CS16_M3::SHOOT_S, CS16_M3::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_xm1014",     CS16_XM1014::DAMAGE,  CS16_XM1014::RPM,  CS16_XM1014::PELLETS, CS16_XM1014::SHOOT_S, CS16_XM1014::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_tmp",        CS16_TMP::DAMAGE,     CS16_TMP::RPM,     1, CS16_TMP::SHOOT_S,     CS16_TMP::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_mac10",      CS16_MAC10::DAMAGE,   CS16_MAC10::RPM,   1, CS16_MAC10::SHOOT_S,   CS16_MAC10::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_mp5navy",    CS16_MP5::DAMAGE,     CS16_MP5::RPM,     1, CS16_MP5::SHOOT_S,     CS16_MP5::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_ump45",      CS16_UMP45::DAMAGE,   CS16_UMP45::RPM,   1, CS16_UMP45::SHOOT_S,   CS16_UMP45::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_p90",        CS16_P90::DAMAGE,     CS16_P90::RPM,     1, CS16_P90::SHOOT_S,     CS16_P90::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_galil",      CS16_GALIL::DAMAGE,   CS16_GALIL::RPM,   1, CS16_GALIL::SHOOT_S,   CS16_GALIL::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_famas",      CS16_FAMAS::DAMAGE,   CS16_FAMAS::RPM_SINGLE, 1, CS16_FAMAS::SHOOT_S, CS16_FAMAS::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_ak47",       CS16_AK47::DAMAGE,    CS16_AK47::RPM,    1, CS16_AK47::SHOOT_S,    CS16_AK47::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_m4a1",       CS16_M4A1::DAMAGE,    CS16_M4A1::RPM,    1, CS16_M4A1::SHOOT_S,    CS16_M4A1::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_aug",        CS16_AUG::DAMAGE,     CS16_AUG::RPM,     1, CS16_AUG::SHOOT_S,     CS16_AUG::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_sg552",      CS16_SG552::DAMAGE,   CS16_SG552::RPM,   1, CS16_SG552::SHOOT_S,   CS16_SG552::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_scout",      CS16_SCOUT::DAMAGE,   CS16_SCOUT::RPM,   1, CS16_SCOUT::SHOOT_S,   CS16_SCOUT::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_awp",        CS16_AWP::DAMAGE,     CS16_AWP::RPM,     1, CS16_AWP::SHOOT_S,     CS16_AWP::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_sg550",      CS16_SG550::DAMAGE,   CS16_SG550::RPM,   1, CS16_SG550::SHOOT_S,   CS16_SG550::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_g3sg1",      CS16_G3SG1::DAMAGE,   CS16_G3SG1::RPM,   1, CS16_G3SG1::SHOOT_S,   CS16_G3SG1::W_MODEL ) );
-    g_TowerGuns.insertLast( TowerGun( "weapon_csm249",     CS16_M249::DAMAGE,    CS16_M249::RPM,    1, CS16_M249::SHOOT_S,    CS16_M249::W_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_csglock18",  CS16_GLOCK18::DAMAGE, CS16_GLOCK18::RPM_SINGLE, 1, CS16_GLOCK18::SHOOT_S, CS16_GLOCK18::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_usp",        CS16_USP::DAMAGE,     CS16_USP::RPM,     1, CS16_USP::SHOOT_S,     CS16_USP::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_p228",       CS16_P228::DAMAGE,    CS16_P228::RPM,    1, CS16_P228::SHOOT_S,    CS16_P228::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_csdeagle",   CS16_DEAGLE::DAMAGE,  CS16_DEAGLE::RPM,  1, CS16_DEAGLE::SHOOT_S,  CS16_DEAGLE::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_fiveseven",  CS16_57::DAMAGE,      CS16_57::RPM,      1, CS16_57::SHOOT_S,      CS16_57::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_dualelites", CS16_ELITES::DAMAGE,  CS16_ELITES::RPM,  1, CS16_ELITES::SHOOT_S,  CS16_ELITES::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_m3",         CS16_M3::DAMAGE,      CS16_M3::RPM_PUMP, CS16_M3::PELLETS, CS16_M3::SHOOT_S, CS16_M3::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_xm1014",     CS16_XM1014::DAMAGE,  CS16_XM1014::RPM,  CS16_XM1014::PELLETS, CS16_XM1014::SHOOT_S, CS16_XM1014::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_tmp",        CS16_TMP::DAMAGE,     CS16_TMP::RPM,     1, CS16_TMP::SHOOT_S,     CS16_TMP::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_mac10",      CS16_MAC10::DAMAGE,   CS16_MAC10::RPM,   1, CS16_MAC10::SHOOT_S,   CS16_MAC10::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_mp5navy",    CS16_MP5::DAMAGE,     CS16_MP5::RPM,     1, CS16_MP5::SHOOT_S,     CS16_MP5::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_ump45",      CS16_UMP45::DAMAGE,   CS16_UMP45::RPM,   1, CS16_UMP45::SHOOT_S,   CS16_UMP45::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_p90",        CS16_P90::DAMAGE,     CS16_P90::RPM,     1, CS16_P90::SHOOT_S,     CS16_P90::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_galil",      CS16_GALIL::DAMAGE,   CS16_GALIL::RPM,   1, CS16_GALIL::SHOOT_S,   CS16_GALIL::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_famas",      CS16_FAMAS::DAMAGE,   CS16_FAMAS::RPM_SINGLE, 1, CS16_FAMAS::SHOOT_S, CS16_FAMAS::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_ak47",       CS16_AK47::DAMAGE,    CS16_AK47::RPM,    1, CS16_AK47::SHOOT_S,    CS16_AK47::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_m4a1",       CS16_M4A1::DAMAGE,    CS16_M4A1::RPM,    1, CS16_M4A1::SHOOT_S,    CS16_M4A1::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_aug",        CS16_AUG::DAMAGE,     CS16_AUG::RPM,     1, CS16_AUG::SHOOT_S,     CS16_AUG::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_sg552",      CS16_SG552::DAMAGE,   CS16_SG552::RPM,   1, CS16_SG552::SHOOT_S,   CS16_SG552::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_scout",      CS16_SCOUT::DAMAGE,   CS16_SCOUT::RPM,   1, CS16_SCOUT::SHOOT_S,   CS16_SCOUT::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_awp",        CS16_AWP::DAMAGE,     CS16_AWP::RPM,     1, CS16_AWP::SHOOT_S,     CS16_AWP::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_sg550",      CS16_SG550::DAMAGE,   CS16_SG550::RPM,   1, CS16_SG550::SHOOT_S,   CS16_SG550::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_g3sg1",      CS16_G3SG1::DAMAGE,   CS16_G3SG1::RPM,   1, CS16_G3SG1::SHOOT_S,   CS16_G3SG1::P_MODEL ) );
+    g_TowerGuns.insertLast( TowerGun( "weapon_csm249",     CS16_M249::DAMAGE,    CS16_M249::RPM,    1, CS16_M249::SHOOT_S,    CS16_M249::P_MODEL ) );
 }
 
 TowerGun@ TowerGunByClass( const string& in cls )
@@ -346,7 +352,7 @@ class CTdTower : ScriptBaseMonsterEntity
         pev.max_health = TOWER_HP;
         pev.view_ofs   = Vector( 0, 0, TOWER_GUN_HEIGHT );
         g_EntityFuncs.SetModel( self, TOWER_BASE_MODEL );
-        pev.scale = 0.6f;
+        pev.scale = TOWER_BASE_SCALE;
         g_EntityFuncs.SetSize( self.pev, Vector( -14, -14, 0 ), Vector( 14, 14, 30 ) );
         self.m_bloodColor = DONT_BLEED;
         self.SetClassification( CLASS_PLAYER_ALLY );
@@ -380,18 +386,18 @@ class CTdTower : ScriptBaseMonsterEntity
         Vector gp = pev.origin + Vector( 0, 0, TOWER_GUN_HEIGHT );
         dictionary kv;
         kv["origin"] = string( gp.x ) + " " + string( gp.y ) + " " + string( gp.z );
-        kv["model"] = g.wmodel;
+        kv["model"] = g.gunmodel;
         kv["targetname"] = "td_tower_gun";
         CBaseEntity@ gun = g_EntityFuncs.CreateEntity( "info_target", kv, true );
         if( gun !is null )
         {
-            g_EntityFuncs.SetModel( gun, g.wmodel );
+            g_EntityFuncs.SetModel( gun, g.gunmodel );
             gun.pev.movetype = MOVETYPE_NOCLIP;
             gun.pev.solid = SOLID_NOT;
-            gun.pev.scale = 1.6f;
+            gun.pev.scale = TOWER_GUN_SCALE;
             gun.pev.effects &= ~EF_NODRAW;
-            g_EntityFuncs.SetOrigin( gun, gp );
             m_hGun = EHandle( gun );
+            AimGun( pev.angles.y );
         }
     }
 
@@ -409,6 +415,21 @@ class CTdTower : ScriptBaseMonsterEntity
         if( pev.owner is null ) return "a";
         CBaseEntity@ o = g_EntityFuncs.Instance( pev.owner );
         return o is null ? "a" : string( o.pev.netname ) + "'s";
+    }
+
+    // Lay the upright p_ model flat and turn it to yaw: pitch +90 puts the barrel forward and the
+    // magazine down (pitch -90 lays it flat too, but backwards and upside down - checked in game).
+    // The model is off-centre, so shift it to keep the middle of the gun right above the base.
+    void AimGun( float yaw )
+    {
+        CBaseEntity@ gun = m_hGun.GetEntity();
+        if( gun is null ) return;
+        float r = yaw * Math.PI / 180.0f;
+        Vector fwd = Vector( cos( r ), sin( r ), 0 ), left = Vector( -sin( r ), cos( r ), 0 );
+        Vector c = P_MODEL_CENTER * TOWER_GUN_SCALE;
+        Vector off = Vector( 0, 0, c.x ) + left * c.y - fwd * c.z;   // where the model centre lands
+        gun.pev.angles = Vector( 90, yaw, 0 );
+        g_EntityFuncs.SetOrigin( gun, pev.origin + Vector( 0, 0, TOWER_GUN_HEIGHT ) - off );
     }
 
     Vector Muzzle() { return pev.origin + Vector( 0, 0, TOWER_GUN_HEIGHT + 2.0f ); }
@@ -479,8 +500,7 @@ class CTdTower : ScriptBaseMonsterEntity
         CBaseEntity@ gun = m_hGun.GetEntity();
         if( gun !is null )
         {
-            Vector ang = Math.VecToAngles( dir );
-            gun.pev.angles = Vector( 0, ang.y + 180.0f, 0 );   // world models point their barrel along -x? (checked in game)
+            AimGun( Math.VecToAngles( dir ).y );
         }
         if( now < m_nextFire ) return;
         m_nextFire = now + m_rate;
@@ -1042,6 +1062,40 @@ bool TdClientSay( SayParameters@ pParams )
         if( next < int( g_Waves.length() ) ) StartWave( next );
         return true;
     }
+    if( a == "!tdbuild" )   // !tdbuild [weapon_x] = a full tower 150 units ahead (no gun needed)
+    {
+        pParams.ShouldHide = true;
+        if( !TdCheat( p ) ) return true;
+        string cls = args.ArgC() > 1 ? args.Arg( 1 ) : "weapon_ak47";
+        for( uint i = 0; i < g_TowerGuns.length(); ++i )
+        {
+            if( g_TowerGuns[i].cls != cls ) continue;
+            float y = p.pev.v_angle.y * Math.PI / 180.0f;
+            Vector at = p.pev.origin + Vector( cos( y ), sin( y ), 0 ) * 150.0f - Vector( 0, 0, 36 );
+            BuildTower( p, g_TowerGuns[i], at, 30, 30, 60 );
+        }
+        return true;
+    }
+    if( a == "!tdcam" )   // !tdcam [dist] [angleAround] [height] = stand by the newest tower, looking at it (filming)
+    {
+        pParams.ShouldHide = true;
+        if( !TdCheat( p ) ) return true;
+        CBaseEntity@ t = g_Towers.length() > 0 ? g_Towers[g_Towers.length() - 1].GetEntity() : null;
+        if( t is null ) return true;
+        float d = args.ArgC() > 1 ? atof( args.Arg( 1 ) ) : 110.0f;
+        float y = args.ArgC() > 2 ? atof( args.Arg( 2 ) ) : 0.0f;
+        float h = args.ArgC() > 3 ? atof( args.Arg( 3 ) ) : 10.0f;
+        Vector dir = Vector( cos( y * Math.PI / 180.0f ), sin( y * Math.PI / 180.0f ), 0 );
+        Vector at = t.pev.origin + dir * d + Vector( 0, 0, h + 36.0f );
+        g_EntityFuncs.SetOrigin( p, at );
+        p.pev.velocity = g_vecZero;
+        Vector look = ( t.pev.origin + Vector( 0, 0, 34 ) ) - ( at + p.pev.view_ofs );
+        Vector ang = Math.VecToAngles( look );
+        p.pev.angles = Vector( -ang.x, ang.y, 0 );
+        p.pev.v_angle = p.pev.angles;
+        p.pev.fixangle = FAM_FORCEVIEWANGLES;
+        return true;
+    }
     if( a == "!tdempty" )   // every tower out of ammo
     {
         pParams.ShouldHide = true;
@@ -1188,7 +1242,7 @@ void TdMapInit()
     BuildTowerGuns();
     for( uint i = 0; i < g_TowerGuns.length(); ++i )
     {
-        g_Game.PrecacheModel( g_TowerGuns[i].wmodel );
+        g_Game.PrecacheModel( g_TowerGuns[i].gunmodel );
         g_SoundSystem.PrecacheSound( g_TowerGuns[i].snd );
     }
     g_Scheduler.SetInterval( "TdThink", 0.1f, g_Scheduler.REPEAT_INFINITE_TIMES );

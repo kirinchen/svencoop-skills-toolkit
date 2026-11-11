@@ -2,17 +2,22 @@
  * cs_td/td.as - tower-defence rules on top of cs_td/core.as (PJ-047 game spec v1, maps/dust2_td)
  *
  * - two gold mines (A / B bomb site), MINE_HP each; every mine pays everyone MINE_INCOME $/s
- * - every monster's goal is a gold mine; players / towers / NPCs it meets on the way get attacked too
+ * - monster target priority: player > tower > NPC (guard / miner / ammo carrier) > gold mine
+ *   (the best one it can see within RETARGET_DIST; nothing in sight -> the nearest mine)
  * - drop a CS gun (G) -> it becomes a tower that fires THAT gun (its damage, fire rate, pellets,
  *   magazine, sound); the gun is gone, a destroyed tower is gone. No price, no limit.
+ *   Tower HP = the gun's full ammo capacity (magazine + reserve with upgrades) -> upgrade, then drop.
+ *   A tower out of ammo stops firing until an ammo carrier brings more.
  *   Looks: the gun's p_ (held) model lying flat on a small sandbag nest, turning to its target.
  *   Server variable td_towers 0 turns towers off.
  * - lose = both mines destroyed (no team lives); win = the last wave cleared
- * - gold miners: 1 per mine at the start, hire more at the Arms Dealer (MINER_PRICE, max MINER_MAX
- *   per mine); each pays +MINER_INCOME $/s, all of them shoot; a miner who sees a monster sounds the
- *   alarm (centre text + siren). Dead miners stay dead (hire again).
- * - ammo carrier: hire at the Arms Dealer (CARRIER_PRICE); walks to towers that are low on ammo
- *   and refills them; monsters can kill him
+ * - guards: GUARDS_PER_MINE armed soldiers per mine (GUARD_HP), never hired, never replaced
+ * - gold miners: unarmed workers (MINER_HP), 1 per mine at the start, hire more at the Arms Dealer
+ *   (MINER_PRICE, max MINER_MAX per mine); each pays +MINER_INCOME $/s. A guard or miner who sees a
+ *   monster sounds the alarm (centre text + siren). Dead miners stay dead (hire again).
+ * - ammo carrier: hire at the Arms Dealer (CARRIER_PRICE). Unarmed, CARRIER_HP, can be killed.
+ *   Loop: at the dealer he buys up to CARRIER_LOAD rounds at shop price with the hirer's money, walks
+ *   them to the towers that need ammo, then walks back -> towers far from the dealer refill slower
  *
  * Test cheats (sv_cheats 1 only; not for real play): !tdhorde N [class], !tdmoney, !tdskip,
  * !tdgo A|B|spawn, !tdhurt A|B dmg, !tdempty, !tdbuild [weapon_x], !tdcam [dist] [angle] [height]
@@ -23,20 +28,28 @@ const int    MINE_INCOME      = 10;      // $ per second per standing mine, to e
 const string MINE_MODEL       = "models/crystal.mdl";
 const float  RETARGET_DIST    = 900.0f;  // a monster chasing something else farther than this goes back to a mine
 
+// v2 (2026-11-11): guards and miners are two NPCs. Guards: 2 per mine, strong, armed, never hired
+// or replaced. Miners: unarmed workers, fragile, 1 per mine at the start, hire more.
+const string GUARD_CLASS      = "monster_human_grunt_ally";
+const int    GUARDS_PER_MINE  = 2;
+const int    GUARD_HP         = 500;
 const int    MINER_PRICE      = 2000;
 const int    MINER_MAX        = 5;       // per mine
 const int    MINER_INCOME     = 10;      // $ per second per living miner, to every player
-const string MINER_CLASS      = "monster_human_grunt_ally";
-const float  ALERT_DIST       = 1100.0f; // a miner "sees" a monster this close (and in line of sight)
+const int    MINER_HP         = 50;
+const string MINER_MODEL      = "models/construction.mdl";
+const float  ALERT_DIST       = 1100.0f; // a guard / miner "sees" a monster this close (and in line of sight)
 const float  ALERT_COOLDOWN   = 10.0f;
 const string ALERT_SOUND      = "ambience/warn2.wav";
 const int    CARRIER_PRICE    = 1000;
-const string CARRIER_CLASS    = "monster_scientist";
+const int    CARRIER_HP       = 150;
+const int    CARRIER_LOAD     = 1500;    // rounds per trip, bought at the Arms Dealer (shop price, paid by whoever hired him)
 const float  CARRIER_REACH    = 110.0f;
+const float  DEALER_REACH     = 150.0f;
 
 const string TOWER_BASE_MODEL = "models/sandbags.mdl";   // a small sandbag nest under the gun
 const float  TOWER_BASE_SCALE = 0.5f;                   // sandbags.mdl is 132x58x50 -> 66x29x25
-const int    TOWER_HP        = 400;
+// tower HP = the gun's full ammo capacity (magazine + reserve, with the owner's upgrades), fixed when it is built
 const float  TOWER_RANGE      = 1400.0f;
 const float  TOWER_RELOAD     = 2.5f;
 const float  TOWER_GUN_HEIGHT = 30.0f;   // gun (and muzzle) above the floor: resting on the sandbags
@@ -237,8 +250,11 @@ void SpawnMine( const Vector& in at, const string& in name )
     g_Mines.insertLast( EHandle( e ) );
     g_MineNames.insertLast( name );
     g_Miners.insertLast( array<EHandle>() );
+    g_Guards.insertLast( array<EHandle>() );
     g_NextAlert.insertLast( 0.0f );
-    SpawnMiner( g_Mines.length() - 1 );   // every mine starts with one miner
+    uint mi = g_Mines.length() - 1;
+    for( int k = 0; k < GUARDS_PER_MINE; ++k ) SpawnGuard( mi );
+    SpawnMiner( mi );   // every mine starts with one miner
     g_Game.AlertMessage( at_console, "[cs_td] gold mine %1 at %2 %3 %4\n", name, feet.x, feet.y, feet.z );
 }
 
@@ -270,12 +286,68 @@ void TdAimAtMine( CBaseMonster@ m )
     if( mine !is null ) AimAt( m, mine );
 }
 
-// once a second (from core's PveThink): a monster with no enemy, a dead enemy, or one it has
-// been led far away by, goes back to the nearest mine
+// target priority (v2): player > tower > NPC (guard / miner / ammo carrier) > gold mine
+int TargetPrio( CBaseEntity@ t )
+{
+    if( t is null ) return 0;
+    if( t.IsPlayer() ) return 4;
+    string c = t.GetClassname();
+    if( c == "td_tower" ) return 3;
+    if( c == "td_goldmine" ) return 1;
+    return 2;
+}
+
+// everything on our side a monster may go for instead of a mine
+void AddTargets( array<CBaseEntity@>@ dst, const array<EHandle>& in hs )
+{
+    for( uint k = 0; k < hs.length(); ++k )
+    {
+        CBaseEntity@ t = hs[k].GetEntity();
+        if( t !is null && t.IsAlive() && t.pev.takedamage != DAMAGE_NO ) dst.insertLast( t );
+    }
+}
+
+array<CBaseEntity@> SideTargets()
+{
+    array<CBaseEntity@> ts;
+    for( int i = 1; i <= g_Engine.maxClients; ++i )
+    {
+        CBasePlayer@ p = g_PlayerFuncs.FindPlayerByIndex( i );
+        if( p !is null && p.IsConnected() && p.IsAlive() && ( p.pev.flags & FL_NOTARGET ) == 0 ) ts.insertLast( p );
+    }
+    AddTargets( @ts, g_Towers );
+    for( uint mi = 0; mi < g_Guards.length(); ++mi ) AddTargets( @ts, g_Guards[mi] );
+    for( uint mi = 0; mi < g_Miners.length(); ++mi ) AddTargets( @ts, g_Miners[mi] );
+    AddTargets( @ts, g_Carriers );
+    return ts;
+}
+
+// the highest-priority target this monster can see within RETARGET_DIST (nearest on a tie), or null
+CBaseEntity@ BestTarget( CBaseMonster@ m, const array<CBaseEntity@>& in ts )
+{
+    CBaseEntity@ best = null;
+    int bp = 0;
+    float bd = 1.0e9f;
+    for( uint k = 0; k < ts.length(); ++k )
+    {
+        CBaseEntity@ t = ts[k];
+        float d = ( t.pev.origin - m.pev.origin ).Length();
+        if( d > RETARGET_DIST ) continue;
+        int pr = TargetPrio( t );
+        if( pr < bp || ( pr == bp && d >= bd ) ) continue;
+        if( !m.FVisible( t, true ) ) continue;
+        @best = t; bp = pr; bd = d;
+    }
+    return best;
+}
+
+// once a second (from core's PveThink): every monster goes for the best target it can see
+// (priority above); with nothing in sight it goes back to the nearest mine
 dictionary g_LastPos;   // entindex -> Vector, position a second ago
 
 void TdNudgeMonsters()
 {
+    array<CBaseEntity@> ts = SideTargets();
     for( uint i = 0; i < g_Alive.length(); ++i )
     {
         CBaseEntity@ e = g_Alive[i].GetEntity();
@@ -291,8 +363,17 @@ void TdNudgeMonsters()
         bool moved = ( e.pev.origin - last ).Length() > 16.0f;
 
         CBaseEntity@ en = m.m_hEnemy.IsValid() ? m.m_hEnemy.GetEntity() : null;
+        if( en !is null && !en.IsAlive() ) @en = null;
+        CBaseEntity@ best = BestTarget( m, ts );
+        if( best !is null && best !is en && ( en is null || TargetPrio( best ) > TargetPrio( en )
+            || ( en.pev.origin - e.pev.origin ).Length() > RETARGET_DIST ) )
+        {
+            AimAt( m, best );
+            @en = best;
+            g_IdleSecs[i] = 0;
+        }
         bool keep = false;
-        if( en !is null && en.IsAlive() )
+        if( en !is null )
         {
             if( en.GetClassname() == "td_goldmine" ) keep = MineAlive( en );
             else keep = ( en.pev.origin - e.pev.origin ).Length() < RETARGET_DIST;
@@ -348,8 +429,8 @@ class CTdTower : ScriptBaseMonsterEntity
         pev.takedamage = DAMAGE_YES;
         pev.flags     |= FL_MONSTER;
         pev.deadflag   = DEAD_NO;
-        pev.health     = TOWER_HP;
-        pev.max_health = TOWER_HP;
+        pev.health     = 100;   // replaced in Setup() by the gun's ammo capacity
+        pev.max_health = 100;
         pev.view_ofs   = Vector( 0, 0, TOWER_GUN_HEIGHT );
         g_EntityFuncs.SetModel( self, TOWER_BASE_MODEL );
         pev.scale = TOWER_BASE_SCALE;
@@ -382,6 +463,8 @@ class CTdTower : ScriptBaseMonsterEntity
         m_label = cg !is null ? cg.label : g.cls;
         int cap = ( cg !is null && owner !is null ) ? CarryCap( owner, cg ) : reserve;
         m_reserveCap = cap > reserve ? cap : reserve;
+        pev.max_health = float( m_clipMax + m_reserveCap );   // HP = full ammo capacity (upgrade before you drop)
+        pev.health = pev.max_health;
         if( owner !is null ) @pev.owner = owner.edict();
         Vector gp = pev.origin + Vector( 0, 0, TOWER_GUN_HEIGHT );
         dictionary kv;
@@ -401,13 +484,26 @@ class CTdTower : ScriptBaseMonsterEntity
         }
     }
 
-    bool NeedsAmmo() { return m_clip + m_reserve < m_clipMax + m_reserveCap; }
+    int Deficit() { int d = m_clipMax + m_reserveCap - m_clip - m_reserve; return d > 0 ? d : 0; }
+    // worth a carrier trip: at least a full magazine short (or nothing left at all)
+    bool NeedsAmmo() { int d = Deficit(); return d > 0 && ( d >= m_clipMax || m_clip + m_reserve == 0 ); }
 
-    void Refill()
+    // an ammo carrier hands over up to n rounds; returns how many were taken
+    int AddAmmo( int n )
     {
-        m_reserve = m_reserveCap + ( m_clipMax - m_clip );   // full spare mags + what the next reload takes
+        int take = Deficit();
+        if( take > n ) take = n;
+        if( take <= 0 ) return 0;
+        m_reserve += take;
         if( m_clip <= 0 && m_reloadEnd <= 0.0f ) m_reloadEnd = g_Engine.time + TOWER_RELOAD;
         m_nextEmptyMsg = 0.0f;
+        return take;
+    }
+
+    int UnitPrice()   // $ per round of this gun's ammo (shop price)
+    {
+        Gun@ g = GunByClass( m_gunCls );
+        return g !is null ? AmmoUnitPrice( g ) : 10;
     }
 
     string OwnerName()
@@ -621,24 +717,29 @@ void BuildTower( CBasePlayer@ owner, TowerGun@ tg, const Vector& in at, int clip
     t.Setup( tg, clipMax, clip, reserve, owner );
     g_Towers.insertLast( EHandle( e ) );
     g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[TD] " + string( owner.pev.netname ) + " built a tower: " + label + " ("
-        + tg.dmg + " dmg x" + tg.pellets + ", " + int( 60.0f / tg.rate + 0.5f ) + " rpm, ammo " + clip + "/" + reserve + ")\n" );
+        + tg.dmg + " dmg x" + tg.pellets + ", " + int( 60.0f / tg.rate + 0.5f ) + " rpm, ammo " + clip + "/" + reserve
+        + ", HP " + int( e.pev.max_health ) + ")\n" );
 }
 
-// ------------------------------------------------------------------ gold miners
+// ------------------------------------------------------------------ guards and gold miners
 
-array<array<EHandle>> g_Miners;   // per mine
+array<array<EHandle>> g_Miners;   // per mine: unarmed workers (income)
+array<array<EHandle>> g_Guards;   // per mine: armed soldiers (never replaced)
 array<float> g_NextAlert;
 
-int AliveMiners( uint mi )
+int AliveIn( const array<EHandle>& in hs )
 {
     int n = 0;
-    for( uint k = 0; k < g_Miners[mi].length(); ++k )
+    for( uint k = 0; k < hs.length(); ++k )
     {
-        CBaseEntity@ e = g_Miners[mi][k].GetEntity();
+        CBaseEntity@ e = hs[k].GetEntity();
         if( e !is null && e.IsAlive() ) ++n;
     }
     return n;
 }
+
+int AliveMiners( uint mi ) { return AliveIn( g_Miners[mi] ); }
+int AliveGuards( uint mi ) { return AliveIn( g_Guards[mi] ); }
 
 int AllAliveMiners()
 {
@@ -648,7 +749,8 @@ int AllAliveMiners()
     return n;
 }
 
-bool SpawnMiner( uint mi )
+// a free floor spot 80-170 units around mine mi
+bool SpotNearMine( uint mi, Vector& out feet )
 {
     CBaseEntity@ mine = g_Mines[mi].GetEntity();
     if( !MineAlive( mine ) ) return false;
@@ -662,20 +764,120 @@ bool SpawnMiner( uint mi )
         g_Utility.TraceLine( c, c - Vector( 0, 0, 200 ), ignore_monsters, null, tr );
         if( tr.fStartSolid != 0 || tr.flFraction >= 1.0f ) continue;
         if( !SpotFree( tr.vecEndPos ) ) continue;
-        Vector feet = tr.vecEndPos;
-        dictionary kv;
-        kv["origin"] = string( feet.x ) + " " + string( feet.y ) + " " + string( feet.z + 4.0f );
-        kv["angles"] = "0 " + string( Math.RandomFloat( 0, 360 ) ) + " 0";
-        kv["displayname"] = g_MineNames[mi] + " Gold Miner";
-        kv["is_player_ally"] = "1";
-        kv["targetname"] = "td_miner";
-        CBaseEntity@ e = g_EntityFuncs.CreateEntity( MINER_CLASS, kv, true );
-        if( e is null ) return false;
-        e.SetClassification( CLASS_PLAYER_ALLY );
-        g_Miners[mi].insertLast( EHandle( e ) );
+        feet = tr.vecEndPos;
         return true;
     }
     return false;
+}
+
+bool SpawnGuard( uint mi )
+{
+    Vector feet;
+    if( !SpotNearMine( mi, feet ) ) return false;
+    dictionary kv;
+    kv["origin"] = string( feet.x ) + " " + string( feet.y ) + " " + string( feet.z + 4.0f );
+    kv["angles"] = "0 " + string( Math.RandomFloat( 0, 360 ) ) + " 0";
+    kv["displayname"] = g_MineNames[mi] + " Mine Guard";
+    kv["is_player_ally"] = "1";
+    kv["weapons"] = "8";   // shotgun: the stock MP5 (6 dmg a round) barely scratches a zombie
+    kv["targetname"] = "td_guard";
+    CBaseEntity@ e = g_EntityFuncs.CreateEntity( GUARD_CLASS, kv, true );
+    if( e is null ) return false;
+    e.SetClassification( CLASS_PLAYER_ALLY );
+    e.pev.health = GUARD_HP;
+    e.pev.max_health = GUARD_HP;
+    g_Guards[mi].insertLast( EHandle( e ) );
+    return true;
+}
+
+bool SpawnMiner( uint mi )
+{
+    Vector feet;
+    if( !SpotNearMine( mi, feet ) ) return false;
+    CBaseEntity@ mine = g_Mines[mi].GetEntity();
+    dictionary kv;
+    kv["origin"] = string( feet.x ) + " " + string( feet.y ) + " " + string( feet.z + 4.0f );
+    kv["angles"] = "0 " + string( Math.VecToYaw( mine.pev.origin - feet ) ) + " 0";   // facing the mine
+    kv["displayname"] = g_MineNames[mi] + " Gold Miner";
+    kv["targetname"] = "td_miner";
+    CBaseEntity@ e = g_EntityFuncs.CreateEntity( "td_worker", kv, true );
+    if( e is null ) return false;
+    g_Miners[mi].insertLast( EHandle( e ) );
+    return true;
+}
+
+// an unarmed worker kneeling at the mine (construction.mdl "inspect_floor"); fragile, never fights
+class CTdWorker : ScriptBaseMonsterEntity
+{
+    int m_workSeq = -1;
+    float m_removeAt = 0.0f;
+
+    void Spawn()
+    {
+        Precache();
+        pev.movetype   = MOVETYPE_STEP;
+        pev.solid      = SOLID_SLIDEBOX;
+        pev.takedamage = DAMAGE_YES;
+        pev.flags     |= FL_MONSTER;
+        pev.deadflag   = DEAD_NO;
+        pev.health     = MINER_HP;
+        pev.max_health = MINER_HP;
+        g_EntityFuncs.SetModel( self, MINER_MODEL );
+        g_EntityFuncs.SetSize( self.pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );
+        pev.view_ofs = Vector( 0, 0, 50 );
+        self.m_bloodColor = BLOOD_COLOR_RED;
+        self.SetClassification( CLASS_PLAYER_ALLY );
+        m_workSeq = self.LookupSequence( "inspect_floor" );
+        if( m_workSeq < 0 ) m_workSeq = self.LookupActivity( ACT_IDLE );
+        Play( m_workSeq );
+        g_EngineFuncs.DropToFloor( self.edict() );
+        SetThink( ThinkFunction( this.WorkThink ) );
+        pev.nextthink = g_Engine.time + 0.1f;
+    }
+
+    void Precache() { g_Game.PrecacheModel( MINER_MODEL ); }
+
+    int Classify() { return CLASS_PLAYER_ALLY; }
+
+    void Play( int seq )
+    {
+        if( seq < 0 ) return;
+        pev.sequence = seq;
+        pev.frame = 0;
+        self.ResetSequenceInfo();
+    }
+
+    int TakeDamage( entvars_t@ pevInflictor, entvars_t@ pevAttacker, float flDamage, int bitsDamageType )
+    {
+        if( pev.deadflag != DEAD_NO ) return 0;
+        CBaseEntity@ att = pevAttacker !is null ? g_EntityFuncs.Instance( pevAttacker ) : null;
+        if( att !is null && ( att.IsPlayer() || att.Classify() == CLASS_PLAYER_ALLY ) ) return 0;
+        pev.health -= flDamage;
+        if( pev.health <= 0 )
+        {
+            pev.deadflag = DEAD_DYING;
+            pev.takedamage = DAMAGE_NO;
+            pev.solid = SOLID_NOT;
+            pev.flags &= ~FL_MONSTER;
+            g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[TD] A gold miner was killed\n" );
+            Play( self.LookupActivity( ACT_DIESIMPLE ) );
+            m_removeAt = g_Engine.time + 4.0f;
+            return 0;
+        }
+        return 1;
+    }
+
+    void WorkThink()
+    {
+        pev.nextthink = g_Engine.time + 0.1f;
+        self.StudioFrameAdvance();
+        if( pev.deadflag != DEAD_NO )
+        {
+            if( g_Engine.time >= m_removeAt ) g_EntityFuncs.Remove( self );
+            return;
+        }
+        if( self.m_fSequenceFinished ) Play( m_workSeq );   // keep working
+    }
 }
 
 void Alarm( uint mi )
@@ -696,28 +898,32 @@ void Alarm( uint mi )
     }
 }
 
-// a living miner with a monster in sight -> alarm for that mine
+bool SeesMonster( const array<EHandle>& in hs )
+{
+    for( uint k = 0; k < hs.length(); ++k )
+    {
+        CBaseEntity@ me = hs[k].GetEntity();
+        if( me is null || !me.IsAlive() ) continue;
+        for( uint j = 0; j < g_Alive.length(); ++j )
+        {
+            CBaseEntity@ e = g_Alive[j].GetEntity();
+            if( e is null || !e.IsAlive() ) continue;
+            if( ( e.pev.origin - me.pev.origin ).Length() > ALERT_DIST ) continue;
+            TraceResult tr;
+            g_Utility.TraceLine( me.pev.origin + me.pev.view_ofs, e.pev.origin + e.pev.view_ofs, ignore_monsters, me.edict(), tr );
+            if( tr.flFraction >= 1.0f ) return true;
+        }
+    }
+    return false;
+}
+
+// a living guard or miner with a monster in sight -> alarm for that mine
 void MinerWatch()
 {
-    for( uint mi = 0; mi < g_Miners.length(); ++mi )
+    for( uint mi = 0; mi < g_Mines.length(); ++mi )
     {
         if( !MineAlive( g_Mines[mi].GetEntity() ) ) continue;
-        bool seen = false;
-        for( uint k = 0; k < g_Miners[mi].length() && !seen; ++k )
-        {
-            CBaseEntity@ me = g_Miners[mi][k].GetEntity();
-            if( me is null || !me.IsAlive() ) continue;
-            CBaseMonster@ mm = me.MyMonsterPointer();
-            if( mm is null ) continue;
-            for( uint j = 0; j < g_Alive.length(); ++j )
-            {
-                CBaseEntity@ e = g_Alive[j].GetEntity();
-                if( e is null || !e.IsAlive() ) continue;
-                if( ( e.pev.origin - me.pev.origin ).Length() > ALERT_DIST ) continue;
-                if( mm.FVisible( e, true ) ) { seen = true; break; }
-            }
-        }
-        if( seen ) Alarm( mi );
+        if( SeesMonster( g_Guards[mi] ) || SeesMonster( g_Miners[mi] ) ) Alarm( mi );
     }
 }
 
@@ -754,9 +960,11 @@ void HireCarrier( CBasePlayer@ p )
     kv["targetname"] = "td_carrier";
     CBaseEntity@ e = g_EntityFuncs.CreateEntity( "td_carrier", kv, true );
     if( e is null ) return;
+    @e.pev.owner = p.edict();   // the hirer pays for the ammo he buys
     g_Carriers.insertLast( EHandle( e ) );
     AddMoney( p, -CARRIER_PRICE );
-    g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[TD] " + string( p.pev.netname ) + " hired an ammo carrier (-$" + CARRIER_PRICE + ")\n" );
+    g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[TD] " + string( p.pev.netname ) + " hired an ammo carrier (-$" + CARRIER_PRICE
+        + "; he buys up to " + CARRIER_LOAD + " rounds a trip at the Arms Dealer, on your money)\n" );
 }
 
 void CarrierThink()
@@ -785,20 +993,26 @@ CBaseEntity@ TowerNeedingAmmo( const Vector& in from )
     return best;
 }
 
+Vector DealerPos() { return g_Stations.length() > 0 ? g_Stations[0] : Vector( 0, 0, 0 ); }
+
 // a scripted walker (the stock scientist AI runs away from gunfire): it asks the node graph for a
-// route (FGetNodeRoute) and steps along it with the engine's MoveToOrigin; no weapon, can be killed
+// route (FGetNodeRoute) and steps along it with the engine's MoveToOrigin; no weapon, can be killed.
+// v2 loop: empty -> walk to the Arms Dealer and buy up to CARRIER_LOAD rounds (hirer's money) ->
+// walk to the towers that need ammo, nearest first, until the load is gone -> back to the dealer.
 class CTdCarrier : ScriptBaseMonsterEntity
 {
     array<Vector> m_path;
     uint m_next = 0;
-    EHandle m_hGoal;
+    Vector m_goalPos;
+    bool m_hasGoal = false;
     float m_nextRoute = 0.0f;
     float m_stuckSince = 0.0f;
     int m_stuckCount = 0;
     float m_bestDist = 1.0e9f;
-    Vector m_lastPos;
     int m_walkSeq = -1;
     int m_idleSeq = -1;
+    int m_load = 0;              // rounds carried
+    float m_nextBroke = 0.0f;
 
     void Spawn()
     {
@@ -808,8 +1022,8 @@ class CTdCarrier : ScriptBaseMonsterEntity
         pev.takedamage = DAMAGE_YES;
         pev.flags     |= FL_MONSTER;
         pev.deadflag   = DEAD_NO;
-        pev.health     = 150;
-        pev.max_health = 150;
+        pev.health     = CARRIER_HP;
+        pev.max_health = CARRIER_HP;
         g_EntityFuncs.SetModel( self, "models/scientist.mdl" );
         g_EntityFuncs.SetSize( self.pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );
         pev.view_ofs = Vector( 0, 0, 64 );
@@ -818,7 +1032,6 @@ class CTdCarrier : ScriptBaseMonsterEntity
         m_walkSeq = self.LookupActivity( ACT_WALK );
         m_idleSeq = self.LookupActivity( ACT_IDLE );
         g_EngineFuncs.DropToFloor( self.edict() );
-        m_lastPos = pev.origin;
         SetThink( ThinkFunction( this.CarrierWalk ) );
         pev.nextthink = g_Engine.time + 0.1f;
     }
@@ -837,7 +1050,7 @@ class CTdCarrier : ScriptBaseMonsterEntity
         {
             pev.deadflag = DEAD_DEAD;
             pev.takedamage = DAMAGE_NO;
-            g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[TD] The ammo carrier was killed\n" );
+            g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[TD] The ammo carrier was killed" + ( m_load > 0 ? " (" + m_load + " rounds lost)" : "" ) + "\n" );
             g_EntityFuncs.SpawnRandomGibs( self.pev, 1, 1 );
             g_EntityFuncs.Remove( self );
             return 0;
@@ -853,11 +1066,62 @@ class CTdCarrier : ScriptBaseMonsterEntity
         self.ResetSequenceInfo();
     }
 
-    void Route( CBaseEntity@ goal )
+    CBasePlayer@ Payer()
+    {
+        if( pev.owner is null ) return null;
+        CBaseEntity@ o = g_EntityFuncs.Instance( pev.owner );
+        CBasePlayer@ p = cast<CBasePlayer@>( o );
+        return ( p !is null && p.IsConnected() ) ? p : null;
+    }
+
+    // at the dealer: buy rounds for the towers that need them (nearest to the dealer first), up to
+    // CARRIER_LOAD and as far as the hirer's money goes, each round at its gun's shop price
+    void Buy()
+    {
+        CBasePlayer@ p = Payer();
+        int money = p !is null ? GetMoney( p ) : 0;
+        int rounds = 0, cost = 0;
+        array<CTdTower@> ts;
+        array<float> ds;
+        for( uint k = 0; k < g_Towers.length(); ++k )
+        {
+            CTdTower@ t = TowerOf( g_Towers[k].GetEntity() );
+            if( t is null || t.pev.deadflag != DEAD_NO || !t.NeedsAmmo() ) continue;
+            float d = ( t.pev.origin - pev.origin ).Length();
+            uint at = 0;
+            while( at < ds.length() && ds[at] < d ) ++at;
+            ts.insertAt( at, t ); ds.insertAt( at, d );
+        }
+        for( uint k = 0; k < ts.length() && rounds < CARRIER_LOAD; ++k )
+        {
+            int need = ts[k].Deficit();
+            if( need > CARRIER_LOAD - rounds ) need = CARRIER_LOAD - rounds;
+            int unit = ts[k].UnitPrice();
+            int afford = unit > 0 ? ( money - cost ) / unit : need;
+            if( need > afford ) need = afford;
+            if( need <= 0 ) break;
+            rounds += need; cost += need * unit;
+        }
+        if( rounds <= 0 )
+        {
+            if( g_Engine.time >= m_nextBroke )
+            {
+                m_nextBroke = g_Engine.time + 15.0f;
+                g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[TD] Ammo carrier is waiting at the Arms Dealer: "
+                    + ( p !is null ? string( p.pev.netname ) + " can't pay for ammo" : "nobody to pay for ammo" ) + "\n" );
+            }
+            return;
+        }
+        AddMoney( p, -cost );
+        m_load = rounds;
+        g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[TD] Ammo carrier bought " + rounds + " rounds (-$" + cost + ", " + string( p.pev.netname ) + ")\n" );
+    }
+
+    void Route( const Vector& in goal )
     {
         m_path.resize( 0 );
         m_next = 0;
-        if( self.FGetNodeRoute( goal.pev.origin ) )
+        if( self.FGetNodeRoute( goal ) )
         {
             for( uint i = 0; i < ROUTE_SIZE; ++i )
             {
@@ -873,15 +1137,11 @@ class CTdCarrier : ScriptBaseMonsterEntity
                 if( ( wp.iType & bits_MF_IS_GOAL ) != 0 ) break;
             }
         }
-        if( m_path.length() == 0 || ( m_path[m_path.length() - 1] - goal.pev.origin ).Length() > 64.0f )
-            m_path.insertLast( goal.pev.origin );           // finish (or, with no route, go) straight to the tower
+        if( m_path.length() == 0 || ( m_path[m_path.length() - 1] - goal ).Length() > 64.0f )
+            m_path.insertLast( goal );           // finish (or, with no route, go) straight to the goal
         // the first node is often behind us: skip it when the second one is closer to us than to it
         if( m_path.length() > 1 && ( m_path[1] - pev.origin ).Length() < ( m_path[1] - m_path[0] ).Length() ) m_next = 1;
         m_stuckCount = 0;
-        string pts = "";
-        for( uint i = 0; i < m_path.length(); ++i ) pts += " (" + int( m_path[i].x ) + "," + int( m_path[i].y ) + "," + int( m_path[i].z ) + ")";
-        g_Game.AlertMessage( at_aiconsole, "[cs_td] carrier at %1 %2 %3 goal %4 %5 %6 route%7\n", int( pev.origin.x ), int( pev.origin.y ), int( pev.origin.z ),
-            int( goal.pev.origin.x ), int( goal.pev.origin.y ), int( goal.pev.origin.z ), pts );
     }
 
     void CarrierWalk()
@@ -890,27 +1150,44 @@ class CTdCarrier : ScriptBaseMonsterEntity
         if( pev.deadflag != DEAD_NO ) return;
         self.StudioFrameAdvance();
 
-        CBaseEntity@ goal = TowerNeedingAmmo( pev.origin );
-        if( goal is null ) { SetSeq( m_idleSeq ); m_path.resize( 0 ); return; }
-
-        float d = ( goal.pev.origin - pev.origin ).Length2D();
-        if( d <= CARRIER_REACH )
+        Vector goal;
+        float reach;
+        CBaseEntity@ tower = null;
+        if( m_load > 0 )
         {
-            CTdTower@ t = TowerOf( goal );
-            if( t !is null )
+            @tower = TowerNeedingAmmo( pev.origin );
+            if( tower is null ) { SetSeq( m_idleSeq ); m_path.resize( 0 ); m_hasGoal = false; return; }   // keep the load, wait
+            goal = tower.pev.origin; reach = CARRIER_REACH;
+        }
+        else
+        {
+            if( TowerNeedingAmmo( pev.origin ) is null || g_Stations.length() == 0 ) { SetSeq( m_idleSeq ); m_path.resize( 0 ); m_hasGoal = false; return; }
+            goal = DealerPos(); reach = DEALER_REACH;
+        }
+
+        if( ( goal - pev.origin ).Length2D() <= reach )
+        {
+            if( tower !is null )
             {
-                t.Refill();
-                g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[TD] Ammo carrier refilled " + t.OwnerName() + " " + t.m_label + " tower ("
-                    + t.m_clip + "/" + t.m_reserve + ")\n" );
+                CTdTower@ t = TowerOf( tower );
+                if( t !is null )
+                {
+                    int given = t.AddAmmo( m_load );
+                    m_load -= given;
+                    g_PlayerFuncs.ClientPrintAll( HUD_PRINTTALK, "[TD] Ammo carrier gave " + given + " rounds to " + t.OwnerName() + " " + t.m_label
+                        + " tower (" + t.m_clip + "/" + t.m_reserve + "), " + m_load + " left\n" );
+                }
             }
+            else Buy();
             SetSeq( m_idleSeq );
             m_path.resize( 0 );
+            m_hasGoal = false;
             return;
         }
 
-        if( m_hGoal.GetEntity() !is goal || m_path.length() == 0 || g_Engine.time >= m_nextRoute )
+        if( !m_hasGoal || ( m_goalPos - goal ).Length() > 32.0f || m_path.length() == 0 || g_Engine.time >= m_nextRoute )
         {
-            m_hGoal = EHandle( goal );
+            m_goalPos = goal; m_hasGoal = true;
             Route( goal );
             m_nextRoute = g_Engine.time + 10.0f;
         }
@@ -978,7 +1255,8 @@ void TdOpenHireMenu( CBasePlayer@ p )
     if( g_MenuHire is null ) return;
     string t = "Hire   ($" + GetMoney( p ) + ")\n";
     for( uint i = 0; i < g_Mines.length(); ++i )
-        t += "mine " + g_MineNames[i] + ": " + ( MineAlive( g_Mines[i].GetEntity() ) ? string( AliveMiners( i ) ) + "/" + MINER_MAX + " miners" : "destroyed" ) + "\n";
+        t += "mine " + g_MineNames[i] + ": " + ( MineAlive( g_Mines[i].GetEntity() ) ? string( AliveMiners( i ) ) + "/" + MINER_MAX + " miners, "
+            + AliveGuards( i ) + " guards" : "destroyed" ) + "\n";
     g_MenuHire.SetTitle( t );
     g_MenuHire.Open( 0, 0, p );
 }
@@ -1026,7 +1304,7 @@ string TdHudLine( CBasePlayer@ p )
     for( uint i = 0; i < g_Mines.length(); ++i )
     {
         CBaseEntity@ m = g_Mines[i].GetEntity();
-        s += "   " + g_MineNames[i] + " mine " + ( MineAlive( m ) ? string( int( m.pev.health ) ) + " (" + AliveMiners( i ) + " miners)" : "X" );
+        s += "   " + g_MineNames[i] + " mine " + ( MineAlive( m ) ? string( int( m.pev.health ) ) + " (" + AliveMiners( i ) + " miners " + AliveGuards( i ) + " guards)" : "X" );
     }
     s += "   +$" + ( MINE_INCOME * AliveMines() + MINER_INCOME * AllAliveMiners() ) + "/s";
     return s;
@@ -1234,7 +1512,10 @@ void TdMapInit()
     g_Game.PrecacheOther( "td_tower" );
     g_Game.PrecacheModel( MINE_MODEL );
     g_Game.PrecacheModel( TOWER_BASE_MODEL );
-    g_Game.PrecacheOther( MINER_CLASS );
+    g_Game.PrecacheOther( GUARD_CLASS );
+    g_CustomEntityFuncs.RegisterCustomEntity( "CTdWorker", "td_worker" );
+    g_Game.PrecacheOther( "td_worker" );
+    g_Game.PrecacheModel( MINER_MODEL );
     g_CustomEntityFuncs.RegisterCustomEntity( "CTdCarrier", "td_carrier" );
     g_Game.PrecacheOther( "td_carrier" );
     g_SoundSystem.PrecacheSound( ALERT_SOUND );
@@ -1248,15 +1529,34 @@ void TdMapInit()
     g_Scheduler.SetInterval( "TdThink", 0.1f, g_Scheduler.REPEAT_INFINITE_TIMES );
 }
 
-// mine spots = the map's two bomb sites (cs2sven put the objective zones into info_target pve_flank;
-// dust2: A = the cluster around x>0, B = x<0). Falls back to TD_MINE_A/B from the map script.
+// mine spots = the map's two bomb sites (cs2sven put the objective zones into info_target pve_flank).
+// The points are split into two groups (2-means); A = the group with the larger x (dust2: x>0).
+// Falls back to TdMineA/B() from the map script.
 void TdMapActivate()
 {
-    array<Vector> a, b;
+    array<Vector> pts, a, b;
     CBaseEntity@ e = null;
-    while( ( @e = g_EntityFuncs.FindEntityByTargetname( e, "pve_flank" ) ) !is null )
+    while( ( @e = g_EntityFuncs.FindEntityByTargetname( e, "pve_flank" ) ) !is null ) pts.insertLast( e.pev.origin );
+    if( pts.length() >= 2 )
     {
-        if( e.pev.origin.x > 0 ) a.insertLast( e.pev.origin ); else b.insertLast( e.pev.origin );
+        Vector ca = pts[0], cb = pts[0];
+        float far = -1.0f;
+        for( uint i = 0; i < pts.length(); ++i )
+        {
+            float d = ( pts[i] - ca ).Length();
+            if( d > far ) { far = d; cb = pts[i]; }
+        }
+        for( int it = 0; it < 8; ++it )
+        {
+            a.resize( 0 ); b.resize( 0 );
+            for( uint i = 0; i < pts.length(); ++i )
+            {
+                if( ( pts[i] - ca ).Length() <= ( pts[i] - cb ).Length() ) a.insertLast( pts[i] ); else b.insertLast( pts[i] );
+            }
+            if( a.length() == 0 || b.length() == 0 ) break;
+            ca = Centre( a ); cb = Centre( b );
+        }
+        if( a.length() > 0 && b.length() > 0 && Centre( a ).x < Centre( b ).x ) { array<Vector> t = a; a = b; b = t; }
     }
     SpawnMine( a.length() > 0 ? Centre( a ) : TdMineA(), "A" );
     SpawnMine( b.length() > 0 ? Centre( b ) : TdMineB(), "B" );

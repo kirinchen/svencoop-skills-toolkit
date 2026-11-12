@@ -3,7 +3,7 @@ siege4 TD - Four Lanes, One Base (rules v2)
 Two gold mines (2000 HP each). Each mine pays everyone $10/s, each miner +$10/s.
 Monsters hit players first, then towers, then NPCs, then the mines.
 Monsters come down all four lanes in big hordes; both mines stand in the middle.
-Monster HP grows every wave (x1.5 on wave 1, x1.12 more each wave).
+Monster HP grows every wave (x1.5 on wave 1, x1.01 more each wave).
 Both mines destroyed = defeat. Clear wave 15 = victory.
 
 TOWERS

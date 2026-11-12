@@ -4,13 +4,13 @@
  * Rules: scripts/maps/cs_td/core.as + scripts/maps/cs_td/td.as. Same 15 waves as dust2_td, twice the
  * monsters (the map is wide open, x3 felt empty), and
  * monster HP grows by the same factor every wave (towers are strong, so monsters get tougher
- * steadily): wave n HP = HP_BASE * HP_GROWTH^(n-1)  (1.5x on wave 1 ... 7.3x on wave 15).
+ * steadily): wave n HP = HP_BASE * HP_GROWTH^(n-1)  (1.5x on wave 1 ... 1.72x on wave 15).
  */
 #include "cs_td/core"
 #include "cs_td/td"
 
 const float HP_BASE   = 1.5f;
-const float HP_GROWTH = 1.12f;
+const float HP_GROWTH = 1.01f;   // was 1.12: Kirin lost on wave 6 and asked for a much flatter curve
 
 // gold mines: the map has no pve_flank points, so these are used (plaza NE and SW corners)
 Vector TdMineA() { return Vector( 448, 448, 0 ); }

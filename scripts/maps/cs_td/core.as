@@ -23,6 +23,7 @@
  */
 
 #include "../cs16/weapons"
+#include "nadespray"
 
 const int   START_MONEY      = 800;
 const int   KILL_REWARD      = 300;     // per monster killed by a player
@@ -213,7 +214,7 @@ void BuildGuns()
     // machine gun
     g_Guns.insertLast( Gun( "weapon_csm249",     "M249",           5750, CAT_RIFLE, "ammo_csm249",     60, "mg", 100, 200 ) );
     // equipment
-    g_Guns.insertLast( Gun( "weapon_hegrenade",  "HE Grenade",      300, CAT_NONE,    "",                 0, "equip" ) );
+    g_Guns.insertLast( Gun( "weapon_nadespray",  "HE Grenade x35 (one click throws all)", 5500, CAT_NONE, "",           0, "equip" ) );
     g_Guns.insertLast( Gun( "kevlar",            "Kevlar (100 armor)", KEVLAR_PRICE, CAT_NONE, "",       0, "equip" ) );
 }
 
@@ -234,6 +235,7 @@ void SetupCS16Weapons()
     CS16_HEGRENADE::POSITION = 10;  CS16_C4::POSITION    = 11;
 
     RegisterAll();
+    TD_NADESPRAY::Register();
 }
 
 string ItemText( Gun@ g ) { return g.label + "  $" + g.price; }

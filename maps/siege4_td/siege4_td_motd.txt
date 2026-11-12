@@ -1,0 +1,22 @@
+siege4 TD - Four Lanes, One Base (rules v2)
+
+Two gold mines (2000 HP each). Each mine pays everyone $10/s, each miner +$10/s.
+Monsters hit players first, then towers, then NPCs, then the mines.
+Monsters come down all four lanes; both mines stand in the middle.
+Monster HP grows every wave (x1.5 on wave 1, x1.12 more each wave).
+Both mines destroyed = defeat. Clear wave 15 = victory.
+
+TOWERS
+- Drop a gun (G): it grows into a tower that fires THAT gun.
+- Tower HP = the gun's full ammo capacity: upgrade the gun first, then drop it.
+- No ammo = no fire, and a red ! appears over it. Only an ammo carrier can refill a tower.
+
+NPCS (Arms Dealer, E -> 8 Hire)
+- Guards: 2 per mine, shotguns, strong. Cannot be hired or replaced. They walk back to the mine after a fight.
+- Miners: unarmed scientists, fragile, +$10/s each. 2 per mine at start, hire more ($2000, max 5).
+- Ammo carrier ($1000): buys up to 1500 rounds per trip at the dealer with YOUR money,
+  walks them to the towers, walks back. Far towers refill slower. Small, unarmed, can be killed.
+
+BUYING (Counter-Strike rules)
+- Walk up to the Arms Dealer in spawn and press E to buy.
+- Buy the same gun again to upgrade it (spare mags, then magazine size).

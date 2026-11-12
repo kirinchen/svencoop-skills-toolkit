@@ -45,6 +45,7 @@ const string MINER_MODEL      = "models/scientist.mdl";   // standing scientists
 const float  ALERT_DIST       = 1100.0f; // a guard / miner "sees" a monster this close (and in line of sight)
 const float  ALERT_COOLDOWN   = 10.0f;
 const float  GUARD_LEASH      = 160.0f;  // a guard with nothing to shoot farther than this from his post walks back
+const float  GUARD_CHASE      = 700.0f;  // ... and one farther than this gives up the chase and walks back anyway
 const int    MINERS_AT_START  = 2;       // per mine
 const float  CARRIER_SCALE    = 0.6f;    // small model + point-sized hull: fits through doors, slips past NPCs
 const string NOAMMO_SPRITE    = "sprites/cs_td/noammo.spr";
@@ -760,6 +761,7 @@ array<array<EHandle>> g_Miners;   // per mine: unarmed workers (income)
 array<array<EHandle>> g_Guards;   // per mine: armed soldiers (never replaced)
 array<array<EHandle>> g_GuardPosts;   // per mine, per guard: where he stands (info_target)
 dictionary g_GuardDue;                // guard entindex -> next time he may be sent home again
+dictionary g_GuardTries;              // guard entindex -> walk-home attempts since he last stood at his post
 array<float> g_NextAlert;
 
 int AliveIn( const array<EHandle>& in hs )
@@ -815,7 +817,7 @@ bool SpawnGuard( uint mi )
     kv["displayname"] = g_MineNames[mi] + " Mine Guard";
     kv["is_player_ally"] = "1";
     kv["weapons"] = "8";   // shotgun: the stock MP5 (6 dmg a round) barely scratches a zombie
-    kv["targetname"] = "td_guard";
+    kv["targetname"] = "td_guard_" + mi + "_" + g_Guards[mi].length();   // unique: his walk-home script finds him by name
     CBaseEntity@ e = g_EntityFuncs.CreateEntity( GUARD_CLASS, kv, true );
     if( e is null ) return false;
     e.SetClassification( CLASS_PLAYER_ALLY );
@@ -832,7 +834,9 @@ bool SpawnGuard( uint mi )
 }
 
 // a guard who chased a monster away from his mine (and then stood in a doorway, blocking the ammo
-// carrier) walks back to his post once nothing is left to shoot
+// carrier) walks back to his post once nothing is left to shoot: he gets a node-graph route to his
+// post and walks it (re-issued every couple of seconds, combat takes over at once). If he still is
+// not back after ~20 s (no route), he is put back on his post.
 void GuardsGoHome()
 {
     for( uint mi = 0; mi < g_Guards.length(); ++mi )
@@ -844,16 +848,35 @@ void GuardsGoHome()
             if( e is null || post is null || !e.IsAlive() ) continue;
             CBaseMonster@ m = e.MyMonsterPointer();
             if( m is null ) continue;
-            CBaseEntity@ en = m.m_hEnemy.IsValid() ? m.m_hEnemy.GetEntity() : null;
-            if( en !is null && en.IsAlive() && m.FVisible( en, true ) ) continue;   // still fighting
-            if( ( post.pev.origin - e.pev.origin ).Length2D() <= GUARD_LEASH ) continue;
             string key = "g" + e.entindex();
+            CBaseEntity@ en = m.m_hEnemy.IsValid() ? m.m_hEnemy.GetEntity() : null;
+            float away = ( post.pev.origin - e.pev.origin ).Length2D();
+            if( away > GUARD_CHASE )   // chased too far down a lane: drop the target, go home
+            {
+                m.m_hEnemy = EHandle();
+                m.ClearSchedule();
+            }
+            else if( en !is null && en.IsAlive() && m.FVisible( en, true ) ) { g_GuardTries[key] = 0; continue; }   // still fighting
+            if( away <= GUARD_LEASH ) { g_GuardTries[key] = 0; continue; }
             float due = g_GuardDue.exists( key ) ? float( g_GuardDue[key] ) : 0.0f;
             if( g_Engine.time < due ) continue;   // already on his way: re-issue every few seconds only
-            g_GuardDue[key] = g_Engine.time + 4.0f;
-            m.m_hTargetEnt = EHandle( post );
-            Schedule@ sch = m.GetScheduleOfType( SCHED_TARGET_CHASE );
-            if( sch !is null ) m.ChangeSchedule( sch );
+            g_GuardDue[key] = g_Engine.time + 2.0f;
+            int tries = g_GuardTries.exists( key ) ? int( g_GuardTries[key] ) : 0;
+            g_GuardTries[key] = tries + 1;
+            if( tries >= 10 )   // ~20 s without getting home: put him back
+            {
+                g_EntityFuncs.SetOrigin( e, post.pev.origin );
+                g_EngineFuncs.DropToFloor( e.edict() );
+                g_GuardTries[key] = 0;
+                continue;
+            }
+            // hand him a node-graph route home; the engine's own movement code walks it (MonsterThink
+            // calls Move() while the movement goal is set), with the walk animation
+            if( !m.FGetNodeRoute( post.pev.origin ) ) continue;
+            m.m_iRouteIndex = 0;
+            m.m_vecMoveGoal = post.pev.origin;
+            m.m_movementGoal = m.RouteClassify( bits_MF_TO_LOCATION );
+            m.m_movementActivity = ACT_WALK;
         }
     }
 }
@@ -1453,6 +1476,20 @@ bool TdClientSay( SayParameters@ pParams )
             CTdTower@ t = TowerOf( g_Towers[k].GetEntity() );
             if( t !is null ) { t.m_clip = 0; t.m_reserve = 0; }
         }
+        return true;
+    }
+    if( a == "!tdguards" )   // each guard's distance from his post (to the console)
+    {
+        pParams.ShouldHide = true;
+        if( !TdCheat( p ) ) return true;
+        for( uint mi = 0; mi < g_Guards.length(); ++mi )
+            for( uint k = 0; k < g_Guards[mi].length() && k < g_GuardPosts[mi].length(); ++k )
+            {
+                CBaseEntity@ e = g_Guards[mi][k].GetEntity();
+                CBaseEntity@ post = g_GuardPosts[mi][k].GetEntity();
+                string st = ( e is null || !e.IsAlive() ) ? "dead" : ( post is null ? "no post" : string( int( ( post.pev.origin - e.pev.origin ).Length2D() ) ) );
+                g_PlayerFuncs.ClientPrint( p, HUD_PRINTCONSOLE, "[tdguards] " + g_MineNames[mi] + k + " " + st + "\n" );
+            }
         return true;
     }
     if( a == "!tdhurt" )   // !tdhurt A 500

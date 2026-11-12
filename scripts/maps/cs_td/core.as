@@ -34,7 +34,7 @@ const int   AMMO_PRICE_MULT  = 4;       // CS ammo prices x4
 const int   UPG_MAX_LEVEL    = 5;       // upgrades per kind (spare mags / magazine size); buying an owned gun again upgrades it
 const float UPG_CLIP_STEP    = 0.20f;
 const int   UPG_MAG_STEP     = 2;
-const int   WAVE_COUNT_MULT  = 3;       // every wave's monster counts x3 (bosses stay single)
+int         WAVE_COUNT_MULT  = 3;       // every wave's monster counts x3 (bosses stay single); a map script may raise it in MapInit()
 const float BUYZONE_PAD      = 320.0f;  // fallback buy zone (no stations): box around the CT spawns + padding
 
 // two NPC "stations" at the CT spawn (spawned by the script, no BSP change):
@@ -60,7 +60,7 @@ const string HOSTAGE_CLASS   = "monster_scientist";
 const string HOSTAGE_NAME    = "Hostage";
 const int    HOSTAGE_HP      = 400;
 const int    HOSTAGE_TARGET_PCT = 35;   // % of spawned monsters that go for a hostage instead of a player
-const int   MAX_ALIVE        = 40;      // concurrent monsters cap
+int         MAX_ALIVE        = 40;      // concurrent monsters cap; a map script may raise it in MapInit()
 const int   SPAWN_PER_TICK   = 4;
 const float SPAWN_POINT_COOLDOWN = 3.0f; // a spawn point is reused only after this many seconds
 const float SPAWN_POINT_CLEAR = 80.0f;   // ... and only if no monster is still standing within this distance

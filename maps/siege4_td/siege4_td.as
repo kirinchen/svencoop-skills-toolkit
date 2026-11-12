@@ -1,7 +1,8 @@
 /*
  * siege4_td.as - siege4 tower defence: a self-made four-lane map (X Hero Siege style), base and
  * both gold mines in the middle, monsters walk in from the four ends.
- * Rules: scripts/maps/cs_td/core.as + scripts/maps/cs_td/td.as. Same 15 waves as dust2_td, but
+ * Rules: scripts/maps/cs_td/core.as + scripts/maps/cs_td/td.as. Same 15 waves as dust2_td, twice the
+ * monsters (the map is wide open, x3 felt empty), and
  * monster HP grows by the same factor every wave (towers are strong, so monsters get tougher
  * steadily): wave n HP = HP_BASE * HP_GROWTH^(n-1)  (1.5x on wave 1 ... 7.3x on wave 15).
  */
@@ -15,7 +16,13 @@ const float HP_GROWTH = 1.12f;
 Vector TdMineA() { return Vector( 448, 448, 0 ); }
 Vector TdMineB() { return Vector( -448, -448, 0 ); }
 
-void MapInit()     { PveMapInit(); }
+// big open map: twice the monsters of dust2_td (x6 the table instead of x3), up to 80 at once
+void MapInit()
+{
+    WAVE_COUNT_MULT = 6;
+    MAX_ALIVE = 80;
+    PveMapInit();
+}
 void MapActivate() { PveMapActivate(); }
 
 void BuildWaves()

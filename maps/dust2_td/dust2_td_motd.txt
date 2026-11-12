@@ -1,13 +1,19 @@
-de_dust2 TD - Gold Mine Defence (CS economy)
+de_dust2 TD - Gold Mine Defence (rules v2)
 
-Two gold mines stand on bomb sites A and B (2000 HP each).
-Every standing mine pays everyone $10 per second. Money cap $1,000,000.
-Every monster goes for a gold mine; anyone it meets on the way gets hit too.
-Both mines destroyed = defeat. Clear wave 15 (the twin gargantuas) = victory.
+Two gold mines (2000 HP each). Each mine pays everyone $10/s, each miner +$10/s.
+Monsters hit players first, then towers, then NPCs, then the mines.
+Both mines destroyed = defeat. Clear wave 15 = victory.
 
 TOWERS
-- Drop a gun (G): it lands and grows into a tower that fires THAT gun.
-- The gun is gone; a destroyed tower is gone. No price, no limit.
+- Drop a gun (G): it grows into a tower that fires THAT gun.
+- Tower HP = the gun's full ammo capacity: upgrade the gun first, then drop it.
+- No ammo = no fire, and a red ! appears over it. Only an ammo carrier can refill a tower.
+
+NPCS (Arms Dealer, E -> 8 Hire)
+- Guards: 2 per mine, shotguns, strong. Cannot be hired or replaced. They walk back to the mine after a fight.
+- Miners: unarmed scientists, fragile, +$10/s each. 2 per mine at start, hire more ($2000, max 5).
+- Ammo carrier ($1000): buys up to 1500 rounds per trip at the dealer with YOUR money,
+  walks them to the towers, walks back. Far towers refill slower. Small, unarmed, can be killed.
 
 BUYING (Counter-Strike rules)
 - Walk up to the Arms Dealer in spawn and press E to buy.

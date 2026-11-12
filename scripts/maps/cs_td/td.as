@@ -11,11 +11,15 @@
  *   Looks: the gun's p_ (held) model lying flat on a small sandbag nest, turning to its target.
  *   Server variable td_towers 0 turns towers off.
  * - lose = both mines destroyed (no team lives); win = the last wave cleared
- * - guards: GUARDS_PER_MINE armed soldiers per mine (GUARD_HP), never hired, never replaced
- * - gold miners: unarmed workers (MINER_HP), 1 per mine at the start, hire more at the Arms Dealer
- *   (MINER_PRICE, max MINER_MAX per mine); each pays +MINER_INCOME $/s. A guard or miner who sees a
- *   monster sounds the alarm (centre text + siren). Dead miners stay dead (hire again).
+ * - guards: GUARDS_PER_MINE armed soldiers per mine (GUARD_HP, shotgun), never hired, never replaced;
+ *   with nothing left to shoot a guard walks back to his post (GUARD_LEASH)
+ * - gold miners: unarmed scientists standing at the mine (MINER_HP), MINERS_AT_START per mine, hire
+ *   more at the Arms Dealer (MINER_PRICE, max MINER_MAX per mine); each pays +MINER_INCOME $/s.
+ *   A guard or miner who sees a monster raises the alarm (centre text only, no sound).
+ *   Dead miners stay dead (hire again).
  * - ammo carrier: hire at the Arms Dealer (CARRIER_PRICE). Unarmed, CARRIER_HP, can be killed.
+ *   Small (CARRIER_SCALE, point-sized hull) so he gets through doors. A tower with no rounds left
+ *   shows a red "!" (NOAMMO_SPRITE) until he brings more.
  *   Loop: at the dealer he buys up to CARRIER_LOAD rounds at shop price with the hirer's money, walks
  *   them to the towers that need ammo, then walks back -> towers far from the dealer refill slower
  *
@@ -37,10 +41,13 @@ const int    MINER_PRICE      = 2000;
 const int    MINER_MAX        = 5;       // per mine
 const int    MINER_INCOME     = 10;      // $ per second per living miner, to every player
 const int    MINER_HP         = 50;
-const string MINER_MODEL      = "models/construction.mdl";
+const string MINER_MODEL      = "models/scientist.mdl";   // standing scientists (the kneeling construction worker sank into the floor)
 const float  ALERT_DIST       = 1100.0f; // a guard / miner "sees" a monster this close (and in line of sight)
 const float  ALERT_COOLDOWN   = 10.0f;
-const string ALERT_SOUND      = "ambience/warn2.wav";
+const float  GUARD_LEASH      = 160.0f;  // a guard with nothing to shoot farther than this from his post walks back
+const int    MINERS_AT_START  = 2;       // per mine
+const float  CARRIER_SCALE    = 0.6f;    // small model + point-sized hull: fits through doors, slips past NPCs
+const string NOAMMO_SPRITE    = "sprites/cs_td/noammo.spr";
 const int    CARRIER_PRICE    = 1000;
 const int    CARRIER_HP       = 150;
 const int    CARRIER_LOAD     = 1500;    // rounds per trip, bought at the Arms Dealer (shop price, paid by whoever hired him)
@@ -251,10 +258,11 @@ void SpawnMine( const Vector& in at, const string& in name )
     g_MineNames.insertLast( name );
     g_Miners.insertLast( array<EHandle>() );
     g_Guards.insertLast( array<EHandle>() );
+    g_GuardPosts.insertLast( array<EHandle>() );
     g_NextAlert.insertLast( 0.0f );
     uint mi = g_Mines.length() - 1;
     for( int k = 0; k < GUARDS_PER_MINE; ++k ) SpawnGuard( mi );
-    SpawnMiner( mi );   // every mine starts with one miner
+    for( int k = 0; k < MINERS_AT_START; ++k ) SpawnMiner( mi );
     g_Game.AlertMessage( at_console, "[cs_td] gold mine %1 at %2 %3 %4\n", name, feet.x, feet.y, feet.z );
 }
 
@@ -417,6 +425,7 @@ class CTdTower : ScriptBaseMonsterEntity
     float m_nextFire = 0.0f;
     float m_reloadEnd = 0.0f;
     EHandle m_hGun;      // the gun model on top
+    EHandle m_hBang;     // red "!" floating above while the tower is out of ammo
     EHandle m_hTarget;
     float m_nextScan = 0.0f;
     float m_nextEmptyMsg = 0.0f;
@@ -482,6 +491,26 @@ class CTdTower : ScriptBaseMonsterEntity
             m_hGun = EHandle( gun );
             AimGun( pev.angles.y );
         }
+        Vector bp = pev.origin + Vector( 0, 0, TOWER_GUN_HEIGHT + 40.0f );
+        dictionary sk;
+        sk["origin"] = string( bp.x ) + " " + string( bp.y ) + " " + string( bp.z );
+        sk["model"] = NOAMMO_SPRITE;
+        sk["rendermode"] = "4";    // alpha test: palette index 255 is see-through
+        sk["renderamt"] = "255";
+        sk["scale"] = "0.6";
+        sk["spawnflags"] = "1";    // start on
+        CBaseEntity@ bang = g_EntityFuncs.CreateEntity( "env_sprite", sk, true );
+        if( bang !is null ) { bang.pev.effects |= EF_NODRAW; m_hBang = EHandle( bang ); }
+        UpdateBang();
+    }
+
+    // the "!" shows while the tower has no rounds at all (magazine and reserve empty)
+    void UpdateBang()
+    {
+        CBaseEntity@ bang = m_hBang.GetEntity();
+        if( bang is null ) return;
+        bool empty = pev.deadflag == DEAD_NO && m_clip + m_reserve <= 0;
+        if( empty ) bang.pev.effects &= ~EF_NODRAW; else bang.pev.effects |= EF_NODRAW;
     }
 
     int Deficit() { int d = m_clipMax + m_reserveCap - m_clip - m_reserve; return d > 0 ? d : 0; }
@@ -497,6 +526,7 @@ class CTdTower : ScriptBaseMonsterEntity
         m_reserve += take;
         if( m_clip <= 0 && m_reloadEnd <= 0.0f ) m_reloadEnd = g_Engine.time + TOWER_RELOAD;
         m_nextEmptyMsg = 0.0f;
+        UpdateBang();
         return take;
     }
 
@@ -573,6 +603,7 @@ class CTdTower : ScriptBaseMonsterEntity
         if( m_clip <= 0 )
         {
             if( m_reserve > 0 ) { m_reloadEnd = now + TOWER_RELOAD; return; }
+            UpdateBang();
             if( now >= m_nextEmptyMsg )
             {
                 m_nextEmptyMsg = now + 15.0f;
@@ -617,6 +648,8 @@ class CTdTower : ScriptBaseMonsterEntity
         g_EntityFuncs.CreateExplosion( pev.origin + Vector( 0, 0, 20 ), Vector( 0, 0, 0 ), null, 40, false );
         CBaseEntity@ gun = m_hGun.GetEntity();
         if( gun !is null ) g_EntityFuncs.Remove( gun );
+        CBaseEntity@ bang = m_hBang.GetEntity();
+        if( bang !is null ) g_EntityFuncs.Remove( bang );
         g_EntityFuncs.Remove( self );
     }
 }
@@ -725,6 +758,8 @@ void BuildTower( CBasePlayer@ owner, TowerGun@ tg, const Vector& in at, int clip
 
 array<array<EHandle>> g_Miners;   // per mine: unarmed workers (income)
 array<array<EHandle>> g_Guards;   // per mine: armed soldiers (never replaced)
+array<array<EHandle>> g_GuardPosts;   // per mine, per guard: where he stands (info_target)
+dictionary g_GuardDue;                // guard entindex -> next time he may be sent home again
 array<float> g_NextAlert;
 
 int AliveIn( const array<EHandle>& in hs )
@@ -787,7 +822,40 @@ bool SpawnGuard( uint mi )
     e.pev.health = GUARD_HP;
     e.pev.max_health = GUARD_HP;
     g_Guards[mi].insertLast( EHandle( e ) );
+    // his post: an invisible marker he walks back to when there is nothing to shoot
+    dictionary pk;
+    pk["origin"] = string( feet.x ) + " " + string( feet.y ) + " " + string( feet.z + 4.0f );
+    pk["targetname"] = "td_guard_post";
+    CBaseEntity@ post = g_EntityFuncs.CreateEntity( "info_target", pk, true );
+    g_GuardPosts[mi].insertLast( EHandle( post ) );
     return true;
+}
+
+// a guard who chased a monster away from his mine (and then stood in a doorway, blocking the ammo
+// carrier) walks back to his post once nothing is left to shoot
+void GuardsGoHome()
+{
+    for( uint mi = 0; mi < g_Guards.length(); ++mi )
+    {
+        for( uint k = 0; k < g_Guards[mi].length() && k < g_GuardPosts[mi].length(); ++k )
+        {
+            CBaseEntity@ e = g_Guards[mi][k].GetEntity();
+            CBaseEntity@ post = g_GuardPosts[mi][k].GetEntity();
+            if( e is null || post is null || !e.IsAlive() ) continue;
+            CBaseMonster@ m = e.MyMonsterPointer();
+            if( m is null ) continue;
+            CBaseEntity@ en = m.m_hEnemy.IsValid() ? m.m_hEnemy.GetEntity() : null;
+            if( en !is null && en.IsAlive() && m.FVisible( en, true ) ) continue;   // still fighting
+            if( ( post.pev.origin - e.pev.origin ).Length2D() <= GUARD_LEASH ) continue;
+            string key = "g" + e.entindex();
+            float due = g_GuardDue.exists( key ) ? float( g_GuardDue[key] ) : 0.0f;
+            if( g_Engine.time < due ) continue;   // already on his way: re-issue every few seconds only
+            g_GuardDue[key] = g_Engine.time + 4.0f;
+            m.m_hTargetEnt = EHandle( post );
+            Schedule@ sch = m.GetScheduleOfType( SCHED_TARGET_CHASE );
+            if( sch !is null ) m.ChangeSchedule( sch );
+        }
+    }
 }
 
 bool SpawnMiner( uint mi )
@@ -806,10 +874,11 @@ bool SpawnMiner( uint mi )
     return true;
 }
 
-// an unarmed worker kneeling at the mine (construction.mdl "inspect_floor"); fragile, never fights
+// an unarmed scientist standing at the mine, idling (looks around, ponders, checks his tie); fragile, never fights
 class CTdWorker : ScriptBaseMonsterEntity
 {
     int m_workSeq = -1;
+    array<int> m_idles;
     float m_removeAt = 0.0f;
 
     void Spawn()
@@ -827,9 +896,10 @@ class CTdWorker : ScriptBaseMonsterEntity
         pev.view_ofs = Vector( 0, 0, 50 );
         self.m_bloodColor = BLOOD_COLOR_RED;
         self.SetClassification( CLASS_PLAYER_ALLY );
-        m_workSeq = self.LookupSequence( "inspect_floor" );
-        if( m_workSeq < 0 ) m_workSeq = self.LookupActivity( ACT_IDLE );
-        Play( m_workSeq );
+        array<string> names = { "idle1", "idle3", "pondering", "pondering2", "checktie", "eye_wipe" };
+        for( uint k = 0; k < names.length(); ++k ) { int s = self.LookupSequence( names[k] ); if( s >= 0 ) m_idles.insertLast( s ); }
+        m_workSeq = self.LookupActivity( ACT_IDLE );
+        Play( NextIdle() );
         g_EngineFuncs.DropToFloor( self.edict() );
         SetThink( ThinkFunction( this.WorkThink ) );
         pev.nextthink = g_Engine.time + 0.1f;
@@ -876,8 +946,10 @@ class CTdWorker : ScriptBaseMonsterEntity
             if( g_Engine.time >= m_removeAt ) g_EntityFuncs.Remove( self );
             return;
         }
-        if( self.m_fSequenceFinished ) Play( m_workSeq );   // keep working
+        if( self.m_fSequenceFinished ) Play( NextIdle() );
     }
+
+    int NextIdle() { return m_idles.length() > 0 ? m_idles[Math.RandomLong( 0, m_idles.length() - 1 )] : m_workSeq; }
 }
 
 void Alarm( uint mi )
@@ -889,13 +961,7 @@ void Alarm( uint mi )
     tp.r1 = 255; tp.g1 = 60; tp.b1 = 40; tp.a1 = 255;
     tp.r2 = 255; tp.g2 = 255; tp.b2 = 255; tp.a2 = 255;
     tp.fadeinTime = 0.05; tp.fadeoutTime = 0.5; tp.holdTime = 3.0; tp.fxTime = 0.3;
-    g_PlayerFuncs.HudMessageAll( tp, "GOLD MINE " + g_MineNames[mi] + ": ENEMY SPOTTED!" );
-    for( int i = 1; i <= g_Engine.maxClients; ++i )
-    {
-        CBasePlayer@ p = g_PlayerFuncs.FindPlayerByIndex( i );
-        if( p is null || !p.IsConnected() ) continue;
-        g_SoundSystem.EmitSoundDyn( p.edict(), CHAN_STATIC, ALERT_SOUND, 1.0f, ATTN_NONE, 0, PITCH_NORM );
-    }
+    g_PlayerFuncs.HudMessageAll( tp, "GOLD MINE " + g_MineNames[mi] + ": ENEMY SPOTTED!" );   // text only, no siren (too loud)
 }
 
 bool SeesMonster( const array<EHandle>& in hs )
@@ -1025,8 +1091,11 @@ class CTdCarrier : ScriptBaseMonsterEntity
         pev.health     = CARRIER_HP;
         pev.max_health = CARRIER_HP;
         g_EntityFuncs.SetModel( self, "models/scientist.mdl" );
-        g_EntityFuncs.SetSize( self.pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );
-        pev.view_ofs = Vector( 0, 0, 64 );
+        pev.scale = CARRIER_SCALE;
+        // 8 units wide -> the engine moves him with the point hull: no more snagging on door frames
+        // and corners (the human hull is 32 wide); still 44 tall so bullets and claws can hit him
+        g_EntityFuncs.SetSize( self.pev, Vector( -4, -4, 0 ), Vector( 4, 4, 44 ) );
+        pev.view_ofs = Vector( 0, 0, 38 );
         self.m_bloodColor = BLOOD_COLOR_RED;
         self.SetClassification( CLASS_PLAYER_ALLY );
         m_walkSeq = self.LookupActivity( ACT_WALK );
@@ -1222,7 +1291,7 @@ class CTdCarrier : ScriptBaseMonsterEntity
                 Vector cand = pev.origin + flat * dist;
                 cand.z = ( to.z > pev.origin.z ? to.z : pev.origin.z ) + float( hgt );
                 TraceResult th;
-                g_Utility.TraceHull( cand, cand, ignore_monsters, human_hull, self.edict(), th );
+                g_Utility.TraceHull( cand, cand, ignore_monsters, head_hull, self.edict(), th );
                 if( th.fStartSolid != 0 || th.fAllSolid != 0 ) continue;
                 TraceResult tl;   // and a clear line to it (no hopping through walls)
                 g_Utility.TraceLine( pev.origin + Vector( 0, 0, float( hgt ) + 20.0f ), cand + Vector( 0, 0, 20 ), ignore_monsters, self.edict(), tl );
@@ -1286,6 +1355,7 @@ void TdThink()
         if( g_State == PVE_WAVE || g_State == PVE_CLEARED || g_State == PVE_COUNTDOWN )
         {
             MinerWatch();
+            GuardsGoHome();
             CarrierThink();
             int pay = MINE_INCOME * AliveMines() + MINER_INCOME * AllAliveMiners();
             if( pay > 0 ) AddMoneyAll( pay );
@@ -1516,9 +1586,9 @@ void TdMapInit()
     g_CustomEntityFuncs.RegisterCustomEntity( "CTdWorker", "td_worker" );
     g_Game.PrecacheOther( "td_worker" );
     g_Game.PrecacheModel( MINER_MODEL );
+    g_Game.PrecacheModel( NOAMMO_SPRITE );
     g_CustomEntityFuncs.RegisterCustomEntity( "CTdCarrier", "td_carrier" );
     g_Game.PrecacheOther( "td_carrier" );
-    g_SoundSystem.PrecacheSound( ALERT_SOUND );
     BuildHireMenu();
     BuildTowerGuns();
     for( uint i = 0; i < g_TowerGuns.length(); ++i )
